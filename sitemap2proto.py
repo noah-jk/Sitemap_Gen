@@ -3,10 +3,11 @@
 Sitemap_Gen - turn a Markdown nested-list sitemap into a clickable static prototype.
 
 Usage:
-    python3 sitemap2proto.py sitemap.md                       # -> ./prototype/
-    python3 sitemap2proto.py sitemap.md out_dir               # custom output folder
-    python3 sitemap2proto.py sitemap.md --nav-style sidebar   # sidebar accordion layout
-    python3 sitemap2proto.py --help                           # full option list
+    python3 sitemap2proto.py sitemap.md                          # -> ./prototype/
+    python3 sitemap2proto.py sitemap.md out_dir                  # custom output folder
+    python3 sitemap2proto.py sitemap.md --nav-style sidebar      # sidebar accordion layout
+    python3 sitemap2proto.py sitemap.md --dropdown-depth 2       # 2-level flyout nav
+    python3 sitemap2proto.py --help                              # full option list
 
 The whole program is three stages with a hard wall between them:
 
@@ -93,7 +94,7 @@ def parse_footer(text: str) -> list:
         if FOOTER_HEADING.match(line.strip()):
             in_footer = True
             continue
-        if in_footer and re.match(r"^#", line):
+        if in_footer and re.match(r"^##", line):
             break
         if in_footer:
             footer_lines.append(line)
@@ -198,7 +199,19 @@ def rel(from_path: str, to_path: str) -> str:
 def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
-def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}, nav_style: str = "grid") -> str:
+def nav_dropdown(children: list, here: str, remaining_levels: int) -> str:
+    """Recursively build <li> items for a dropdown or flyout panel."""
+    items = ""
+    for c in children:
+        link = f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+        if remaining_levels > 1 and c.children:
+            sub = nav_dropdown(c.children, here, remaining_levels - 1)
+            items += f'<li class="has-flyout">{link}<ul class="flyout">{sub}</ul></li>'
+        else:
+            items += f'<li>{link}</li>'
+    return items
+
+def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}, nav_style: str = "grid", dropdown_depth: int = 0) -> str:
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
@@ -206,11 +219,22 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
     # global nav = the root's direct children; mark the active section
     anc = ancestors(node)
     section_of_node = anc[1] if len(anc) > 1 else None
-    nav_items = "".join(
-        f'<a class="{"active" if c is section_of_node else ""}" '
-        f'href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-        for c in root.children
-    )
+    if dropdown_depth > 0:
+        nav_items = ""
+        for c in root.children:
+            is_active = "active" if c is section_of_node else ""
+            link = f'<a class="{is_active}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+            if c.children:
+                sub = nav_dropdown(c.children, here, dropdown_depth)
+                nav_items += f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>'
+            else:
+                nav_items += link
+    else:
+        nav_items = "".join(
+            f'<a class="{"active" if c is section_of_node else ""}" '
+            f'href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+            for c in root.children
+        )
 
     # breadcrumb = the ancestor chain, last one not a link
     crumbs = ancestors(node)
@@ -339,6 +363,19 @@ a{color:var(--accent); text-decoration:none}
 }
 .globalnav a:hover{background:rgba(255,255,255,.1); color:#fff}
 .globalnav a.active{background:var(--accent); color:#fff}
+.nav-item{position:relative; display:inline-flex}
+.nav-item>.dropdown,.has-flyout>.flyout{
+  display:none; position:absolute;
+  background:#0d1117; border:1px solid rgba(255,255,255,.12);
+  border-radius:8px; padding:6px 0; min-width:180px;
+  list-style:none; margin:0; z-index:200;
+}
+.nav-item>.dropdown{top:100%; left:0}
+.has-flyout>.flyout{left:100%; top:-6px;}
+.has-flyout{position: relative;}
+.nav-item:hover>.dropdown,.has-flyout:hover>.flyout{display:block;}
+.dropdown a,.flyout a{display:block; padding:8px 16px; border-radius:0; white-space:nowrap}
+.has-flyout>a::after{content:" ›"; opacity:.5; font-size:11px}
 .breadcrumb{
   padding:10px 22px; color:var(--muted); font-size:12px;
   border-bottom:1px solid var(--line); background:#fff;
@@ -423,7 +460,7 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 # --------------------------------------------------------------------------
 # DRIVER
 # --------------------------------------------------------------------------
-def build(md_path: str, out_dir: str, nav_style: str = "grid") -> int:
+def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: int = 0) -> int:
     with open(md_path, encoding="utf-8") as f:
         src = f.read()
 
@@ -448,7 +485,7 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid") -> int:
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth))
         count += 1
         stack.extend(node.children)
 
@@ -456,7 +493,7 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid") -> int:
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth))
         count += 1
 
     return count
@@ -468,8 +505,10 @@ def main() -> None:
     ap.add_argument("out_dir", nargs="?", default="prototype", help="output directory (default: prototype)")
     ap.add_argument("--nav-style", choices=["grid", "sidebar"], default="grid",
                     help="render 'In this section' as a card grid (default) or sidebar accordion")
+    ap.add_argument("--dropdown-depth", type=int, default=0, metavar="N",
+                    help="levels of dropdown flyout menus in the global nav (0 = flat, default)")
     args = ap.parse_args()
-    n = build(args.sitemap, args.out_dir, args.nav_style)
+    n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth)
     index = os.path.join(args.out_dir, "index.html")
     print(f"Built {n} pages -> {args.out_dir}/")
     print(f"Open: {os.path.abspath(index)}")
