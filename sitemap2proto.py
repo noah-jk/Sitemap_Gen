@@ -35,6 +35,11 @@ class Node:
     slug: str = ""        # url-safe name for this page's folder
     out_path: str = ""    # where this page's index.html lands, relative to output root
 
+@dataclass
+class FooterColumn:
+    label: str
+    links: list = field(default_factory=list)  # page titles
+
 
 # --------------------------------------------------------------------------
 # 1. PARSE  - markdown nested list  ->  tree
@@ -72,6 +77,42 @@ def parse_markdown(text: str) -> Node:
     return root
 
 
+FOOTER_HEADING = re.compile(r"^##\s+footer\s*$", re.IGNORECASE)
+
+def parse_footer(text: str) -> list:
+    """
+    Extracts the ## Footer section and returns up to 4 FooterColumns.
+    Top-level list items are column headers; their immediate children are link titles.
+    """
+    lines = text.splitlines()
+    in_footer = False
+    footer_lines = []
+    for line in lines:
+        if FOOTER_HEADING.match(line.strip()):
+            in_footer = True
+            continue
+        if in_footer and re.match(r"^#", line):
+            break
+        if in_footer:
+            footer_lines.append(line)
+
+    columns: list[FooterColumn] = []
+    for raw in footer_lines:
+        m = LIST_LINE.match(raw)
+        if not m:
+            continue
+        indent = len(m.group(1).expandtabs(4))
+        title = m.group(2).strip()
+        if indent == 0:
+            if len(columns) == 4:
+                break
+            columns.append(FooterColumn(label=title))
+        elif columns:
+            columns[-1].links.append(title)
+
+    return columns
+
+
 # --------------------------------------------------------------------------
 # 2. DERIVE  - tree  ->  slugs + output paths
 # --------------------------------------------------------------------------
@@ -102,6 +143,40 @@ def assign_paths(root: Node) -> None:
     walk(root, [])
 
 
+def build_title_index(root: Node) -> dict:
+    """Flat map of title -> Node for resolving footer links."""
+    index: dict[str, Node] = {}
+    stack = list(root.children)
+    while stack:
+        n = stack.pop()
+        index[n.title] = n
+        stack.extend(n.children)
+    return index
+
+def resolve_footer_nodes(footer_cols: list, title_index: dict, root: Node) -> list:
+    """
+    For any footer link title not already in the sitemap, create a standalone
+    Node with its own page. These pages are reachable from the footer but do
+    not appear in the global nav.
+    """
+    used_slugs = {c.slug for c in root.children}
+    extra: list[Node] = []
+    for col in footer_cols:
+        for lt in col.links:
+            if lt in title_index:
+                continue
+            base = slugify(lt)
+            slug, n = base, 1
+            while slug in used_slugs:
+                n += 1
+                slug = f"{base}-{n}"
+            used_slugs.add(slug)
+            node = Node(title=lt, slug=slug, out_path=f"{slug}/index.html")
+            extra.append(node)
+            title_index[lt] = node
+    return extra
+
+
 # --------------------------------------------------------------------------
 # 3. RENDER  - tree  ->  HTML on disk
 # --------------------------------------------------------------------------
@@ -121,13 +196,14 @@ def rel(from_path: str, to_path: str) -> str:
 def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
-def render_page(node: Node, root: Node) -> str:
+def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}) -> str:
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
 
     # global nav = the root's direct children; mark the active section
-    section_of_node = ancestors(node)[1] if node is not root else None
+    anc = ancestors(node)
+    section_of_node = anc[1] if len(anc) > 1 else None
     nav_items = "".join(
         f'<a class="{"active" if c is section_of_node else ""}" '
         f'href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
@@ -155,6 +231,25 @@ def render_page(node: Node, root: Node) -> str:
         children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
     else:
         children_block = '<section class="children leaf"><h2>Leaf page</h2><p>No sub-pages. This is a destination.</p></section>'
+
+    # footer columns: resolve link titles to URLs
+    if footer_cols:
+        col_htmls = []
+        for col in footer_cols:
+            items = "".join(
+                f'<li><a href="{esc(rel(here, n.out_path) if (n := title_index.get(lt)) else "#")}">'
+                f'{esc(lt)}</a></li>'
+                for lt in col.links
+            )
+            col_htmls.append(
+                f'<div class="footer-col"><h3>{esc(col.label)}</h3><ul>{items}</ul></div>'
+            )
+        footer_inner = (
+            f'<div class="footer-cols">{"".join(col_htmls)}</div>'
+            f'<div class="footer-path"><code>{esc(here)}</code></div>'
+        )
+    else:
+        footer_inner = f'<code>{esc(here)}</code>'
 
     # deliberately low-fidelity placeholder body
     skeleton = (
@@ -187,7 +282,7 @@ def render_page(node: Node, root: Node) -> str:
     {skeleton}
   </section>
 </main>
-<footer><code>{esc(here)}</code></footer>
+<footer>{footer_inner}</footer>
 </body>
 </html>
 """
@@ -249,7 +344,25 @@ h2{font-size:13px; text-transform:uppercase; letter-spacing:.1em; color:var(--mu
 .wire-line:nth-child(4){width:97%}
 .wire-line:nth-child(5){width:70%}
 .wire-block{height:160px; margin-top:18px}
-footer{max-width:880px; margin:0 auto; padding:20px 22px 48px; color:var(--muted); font-size:11px}
+footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
+.footer-cols{
+  max-width:880px; margin:0 auto;
+  display:grid; gap:32px;
+  grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+}
+.footer-col h3{
+  font-size:11px; text-transform:uppercase; letter-spacing:.1em;
+  color:rgba(255,255,255,.4); margin:0 0 12px;
+}
+.footer-col ul{list-style:none; padding:0; margin:0}
+.footer-col li{margin-bottom:8px}
+.footer-col a{color:#cbd5e6; font-size:13px}
+.footer-col a:hover{color:#fff}
+.footer-path{
+  max-width:880px; margin:24px auto 0; padding-top:16px;
+  border-top:1px solid rgba(255,255,255,.1);
+  color:rgba(255,255,255,.3); font-size:11px;
+}
 """
 
 
@@ -258,9 +371,14 @@ footer{max-width:880px; margin:0 auto; padding:20px 22px 48px; color:var(--muted
 # --------------------------------------------------------------------------
 def build(md_path: str, out_dir: str) -> int:
     with open(md_path, encoding="utf-8") as f:
-        root = parse_markdown(f.read())
+        src = f.read()
 
+    sitemap_src = re.split(r"^##\s+footer\s*$", src, maxsplit=1, flags=re.IGNORECASE | re.MULTILINE)[0]
+    root = parse_markdown(sitemap_src)
+    footer_cols = parse_footer(src)
     assign_paths(root)
+    title_index = build_title_index(root)
+    footer_only = resolve_footer_nodes(footer_cols, title_index, root)
 
     if os.path.exists(out_dir):
         shutil.rmtree(out_dir)
@@ -276,9 +394,16 @@ def build(md_path: str, out_dir: str) -> int:
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root))
+            f.write(render_page(node, root, footer_cols, title_index))
         count += 1
         stack.extend(node.children)
+
+    for node in footer_only:
+        dest = os.path.join(out_dir, node.out_path)
+        os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(render_page(node, root, footer_cols, title_index))
+        count += 1
 
     return count
 
