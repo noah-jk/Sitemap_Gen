@@ -19,7 +19,7 @@
   - Events
   - Docs
   - FAQ
-- Contact
+- Contact [button]
 
 ## Footer
 # Up to 4 columns. Top-level bullets are column headers (not linked).
