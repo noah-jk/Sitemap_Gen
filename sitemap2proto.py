@@ -3,8 +3,10 @@
 Sitemap_Gen - turn a Markdown nested-list sitemap into a clickable static prototype.
 
 Usage:
-    python3 sitemap2proto.py sitemap.md            # -> ./prototype/
-    python3 sitemap2proto.py sitemap.md out_dir     # -> ./out_dir/
+    python3 sitemap2proto.py sitemap.md                       # -> ./prototype/
+    python3 sitemap2proto.py sitemap.md out_dir               # custom output folder
+    python3 sitemap2proto.py sitemap.md --nav-style sidebar   # sidebar accordion layout
+    python3 sitemap2proto.py --help                           # full option list
 
 The whole program is three stages with a hard wall between them:
 
@@ -18,9 +20,9 @@ and stages 2 and 3 don't change a line. That separation is the whole point.
 
 import os
 import re
-import sys
 import html
 import shutil
+import argparse
 from dataclasses import dataclass, field
 
 
@@ -196,7 +198,7 @@ def rel(from_path: str, to_path: str) -> str:
 def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
-def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}) -> str:
+def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}, nav_style: str = "grid") -> str:
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
@@ -218,19 +220,44 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
         for c in crumbs
     )
 
-    # child links = this page's own children, shown as cards
+    # child links = this page's own children
+    sidebar_html = ""
     if node is root:
         children_block = ""
     elif node.children:
-        cards = "".join(
-            f'<a class="card" href="{esc(rel(here, c.out_path))}">'
-            f'<span class="card-title">{esc(c.title)}</span>'
-            f'<span class="card-arrow">&rarr;</span></a>'
-            for c in node.children
-        )
-        children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
+        if nav_style == "sidebar":
+            children_block = ""
+            items = ""
+            for c in node.children:
+                if c.children:
+                    sub = "".join(
+                        f'<li><a href="{esc(rel(here, gc.out_path))}">{esc(gc.title)}</a></li>'
+                        for gc in c.children
+                    )
+                    items += (
+                        f'<details><summary>'
+                        f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+                        f'</summary><ul>{sub}</ul></details>'
+                    )
+                else:
+                    items += (
+                        f'<a class="sidebar-link" href="{esc(rel(here, c.out_path))}">'
+                        f'{esc(c.title)}</a>'
+                    )
+            sidebar_html = f'<aside class="sidebar"><h2>In this section</h2>{items}</aside>'
+        else:
+            cards = "".join(
+                f'<a class="card" href="{esc(rel(here, c.out_path))}">'
+                f'<span class="card-title">{esc(c.title)}</span>'
+                f'<span class="card-arrow">&rarr;</span></a>'
+                for c in node.children
+            )
+            children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
     else:
         children_block = '<section class="children leaf"><h2>Leaf page</h2><p>No sub-pages. This is a destination.</p></section>'
+
+    layout_open  = '<div class="page-layout">' if sidebar_html else ""
+    layout_close = "</div>"                    if sidebar_html else ""
 
     # footer columns: resolve link titles to URLs
     if footer_cols:
@@ -275,12 +302,15 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
   <h1>{esc(node.title)}</h1>
 </div>
 <div class="breadcrumb">{crumb_html}</div>
+{layout_open}
+{sidebar_html}
 <main>
   {children_block}
   <section class="content">
     {skeleton}
   </section>
 </main>
+{layout_close}
 <footer>{footer_inner}</footer>
 </body>
 </html>
@@ -343,6 +373,31 @@ h2{font-size:13px; text-transform:uppercase; letter-spacing:.1em; color:var(--mu
 .wire-line:nth-child(4){width:97%}
 .wire-line:nth-child(5){width:70%}
 .wire-block{height:160px; margin-top:18px}
+.page-layout{display:flex; align-items:flex-start}
+.sidebar{
+  width:240px; flex-shrink:0; position:sticky; top:52px;
+  height:calc(100vh - 52px); overflow-y:auto;
+  border-right:1px solid var(--line); padding:20px 0;
+  background:#fff;
+}
+.sidebar h2{padding:0 20px; margin:0 0 12px}
+.sidebar details{border-bottom:1px solid var(--line)}
+.sidebar details summary{
+  list-style:none; padding:10px 20px; cursor:pointer;
+  font-size:13px; font-weight:600;
+}
+.sidebar details summary::-webkit-details-marker{display:none}
+.sidebar details summary::after{content:"›"; float:right; color:var(--muted)}
+.sidebar details[open] summary::after{content:"↓"}
+.sidebar details ul{list-style:none; padding:0 0 8px 28px; margin:0}
+.sidebar details li{margin-bottom:6px}
+.sidebar details a{font-size:13px; color:var(--ink)}
+.sidebar details a:hover{color:var(--accent)}
+.sidebar-link{
+  display:block; padding:10px 20px; font-size:13px;
+  border-bottom:1px solid var(--line); color:var(--ink);
+}
+.sidebar-link:hover{color:var(--accent)}
 footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 .footer-cols{
   max-width:880px; margin:0 auto;
@@ -368,7 +423,7 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 # --------------------------------------------------------------------------
 # DRIVER
 # --------------------------------------------------------------------------
-def build(md_path: str, out_dir: str) -> int:
+def build(md_path: str, out_dir: str, nav_style: str = "grid") -> int:
     with open(md_path, encoding="utf-8") as f:
         src = f.read()
 
@@ -393,7 +448,7 @@ def build(md_path: str, out_dir: str) -> int:
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style))
         count += 1
         stack.extend(node.children)
 
@@ -401,21 +456,22 @@ def build(md_path: str, out_dir: str) -> int:
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style))
         count += 1
 
     return count
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-    md_path = sys.argv[1]
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else "prototype"
-    n = build(md_path, out_dir)
-    index = os.path.join(out_dir, "index.html")
-    print(f"Built {n} pages -> {out_dir}/")
+    ap = argparse.ArgumentParser(description="Turn a Markdown sitemap into a clickable static prototype.")
+    ap.add_argument("sitemap", help="path to sitemap .md file")
+    ap.add_argument("out_dir", nargs="?", default="prototype", help="output directory (default: prototype)")
+    ap.add_argument("--nav-style", choices=["grid", "sidebar"], default="grid",
+                    help="render 'In this section' as a card grid (default) or sidebar accordion")
+    args = ap.parse_args()
+    n = build(args.sitemap, args.out_dir, args.nav_style)
+    index = os.path.join(args.out_dir, "index.html")
+    print(f"Built {n} pages -> {args.out_dir}/")
     print(f"Open: {os.path.abspath(index)}")
 
 
