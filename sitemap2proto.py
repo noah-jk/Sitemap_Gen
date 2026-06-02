@@ -199,6 +199,33 @@ def rel(from_path: str, to_path: str) -> str:
 def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
+def _on_path_to(candidate: Node, target: Node) -> bool:
+    """True if candidate is target or an ancestor of target."""
+    n = target
+    while n is not None:
+        if n is candidate:
+            return True
+        n = n.parent
+    return False
+
+def _sidebar_items(nodes: list, here: str, current: Node) -> str:
+    out = ""
+    for n in nodes:
+        cls = ' class="active"' if n is current else ""
+        link = f'<a{cls} href="{esc(rel(here, n.out_path))}">{esc(n.title)}</a>'
+        if n.children:
+            open_attr = " open" if _on_path_to(n, current) else ""
+            sub = _sidebar_items(n.children, here, current)
+            out += f'<details{open_attr}><summary>{link}</summary>{sub}</details>'
+        else:
+            out += f'<div class="sidebar-leaf">{link}</div>'
+    return out
+
+def build_section_sidebar(section_root: Node, here: str, current: Node) -> str:
+    cls = "sidebar-section-title active" if section_root is current else "sidebar-section-title"
+    title = f'<a class="{cls}" href="{esc(rel(here, section_root.out_path))}">{esc(section_root.title)}</a>'
+    return f'<aside class="sidebar">{title}{_sidebar_items(section_root.children, here, current)}</aside>'
+
 def nav_dropdown(children: list, here: str, remaining_levels: int) -> str:
     """Recursively build <li> items for a dropdown or flyout panel."""
     items = ""
@@ -244,39 +271,21 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
         for c in crumbs
     )
 
-    # child links = this page's own children
+    # child links / sidebar
     sidebar_html = ""
     if node is root:
         children_block = ""
+    elif nav_style == "sidebar" and len(anc) > 1:
+        children_block = ""
+        sidebar_html = build_section_sidebar(anc[1], here, node)
     elif node.children:
-        if nav_style == "sidebar":
-            children_block = ""
-            items = ""
-            for c in node.children:
-                if c.children:
-                    sub = "".join(
-                        f'<li><a href="{esc(rel(here, gc.out_path))}">{esc(gc.title)}</a></li>'
-                        for gc in c.children
-                    )
-                    items += (
-                        f'<details><summary>'
-                        f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-                        f'</summary><ul>{sub}</ul></details>'
-                    )
-                else:
-                    items += (
-                        f'<a class="sidebar-link" href="{esc(rel(here, c.out_path))}">'
-                        f'{esc(c.title)}</a>'
-                    )
-            sidebar_html = f'<aside class="sidebar"><h2>In this section</h2>{items}</aside>'
-        else:
-            cards = "".join(
-                f'<a class="card" href="{esc(rel(here, c.out_path))}">'
-                f'<span class="card-title">{esc(c.title)}</span>'
-                f'<span class="card-arrow">&rarr;</span></a>'
-                for c in node.children
-            )
-            children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
+        cards = "".join(
+            f'<a class="card" href="{esc(rel(here, c.out_path))}">'
+            f'<span class="card-title">{esc(c.title)}</span>'
+            f'<span class="card-arrow">&rarr;</span></a>'
+            for c in node.children
+        )
+        children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
     else:
         children_block = '<section class="children leaf"><h2>Leaf page</h2><p>No sub-pages. This is a destination.</p></section>'
 
@@ -411,30 +420,33 @@ h2{font-size:13px; text-transform:uppercase; letter-spacing:.1em; color:var(--mu
 .wire-line:nth-child(5){width:70%}
 .wire-block{height:160px; margin-top:18px}
 .page-layout{display:flex; align-items:flex-start}
+.page-layout main{flex:1; max-width:none; min-width:0}
 .sidebar{
   width:240px; flex-shrink:0; position:sticky; top:52px;
   height:calc(100vh - 52px); overflow-y:auto;
-  border-right:1px solid var(--line); padding:20px 0;
-  background:#fff;
+  border-right:1px solid var(--line); background:#fff;
 }
-.sidebar h2{padding:0 20px; margin:0 0 12px}
+.sidebar-section-title{
+  display:block; padding:14px 20px 10px; font-weight:700; font-size:11px;
+  text-transform:uppercase; letter-spacing:.1em; color:var(--muted);
+  border-bottom:1px solid var(--line);
+}
+.sidebar-section-title.active{color:var(--accent)}
 .sidebar details{border-bottom:1px solid var(--line)}
 .sidebar details summary{
-  list-style:none; padding:10px 20px; cursor:pointer;
-  font-size:13px; font-weight:600;
+  list-style:none; padding:9px 20px; cursor:pointer; font-size:13px;
 }
 .sidebar details summary::-webkit-details-marker{display:none}
-.sidebar details summary::after{content:"›"; float:right; color:var(--muted)}
-.sidebar details[open] summary::after{content:"↓"}
-.sidebar details ul{list-style:none; padding:0 0 8px 28px; margin:0}
-.sidebar details li{margin-bottom:6px}
-.sidebar details a{font-size:13px; color:var(--ink)}
-.sidebar details a:hover{color:var(--accent)}
-.sidebar-link{
-  display:block; padding:10px 20px; font-size:13px;
-  border-bottom:1px solid var(--line); color:var(--ink);
-}
-.sidebar-link:hover{color:var(--accent)}
+.sidebar details summary::after{content:" ›"; float:right; color:var(--muted)}
+.sidebar details[open]>summary::after{content:" ↓"}
+.sidebar details summary a{color:var(--ink)}
+.sidebar details summary a:hover{color:var(--accent)}
+.sidebar details summary a.active{color:var(--accent); font-weight:600}
+.sidebar .sidebar-leaf{border-bottom:1px solid var(--line)}
+.sidebar .sidebar-leaf a{display:block; padding:9px 20px; font-size:13px; color:var(--ink)}
+.sidebar details .sidebar-leaf a{padding-left:32px}
+.sidebar .sidebar-leaf a:hover{color:var(--accent)}
+.sidebar .sidebar-leaf a.active{color:var(--accent); font-weight:600}
 footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 .footer-cols{
   max-width:880px; margin:0 auto;
