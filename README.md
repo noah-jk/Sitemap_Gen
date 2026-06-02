@@ -17,11 +17,7 @@ python3 sitemap2proto.py sitemap.md --dropdown-depth 2  # ->  2-level flyout nav
 python3 sitemap2proto.py --help                         # ->  full option list
 ```
 
-Then open `prototype/index.html`, or serve it for a more realistic feel:
-
-```sh
-python3 -m http.server -d prototype 8000       # visit localhost:8000
-```
+Then open `prototype/index.html`
 
 No dependencies — Python standard library only.
 
@@ -63,10 +59,3 @@ means writing one new parser; stages 2 and 3 are untouched.
 Each run wipes and rebuilds the output folder, so the prototype is always a pure
 reflection of the sitemap. Don't hand-edit files inside `prototype/` — they're
 overwritten on the next run. The sitemap is the source of truth.
-
-## Roadmap
-
-- CSV path-based parser (same tree, proves the architecture)
-- Per-page template hints for varied wireframe bodies
-- Annotation notes rendered as stakeholder review comments
-- Optional watch-and-rebuild mode
