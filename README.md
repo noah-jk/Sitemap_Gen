@@ -7,6 +7,16 @@ A sitemap is a static document, but information architecture is something you
 URLs, derived navigation — so you can experience the menus and flow before any
 design happens. Page content is intentionally low-fidelity wireframe placeholder.
 
+## Getting started
+
+```sh
+cp sitemap-example.md sitemap.md   # start from the example
+# edit sitemap.md with your own structure
+python3 sitemap2proto.py sitemap.md
+```
+
+`sitemap.md` is gitignored so your content stays local and out of version control.
+
 ## Usage
 
 ```sh
