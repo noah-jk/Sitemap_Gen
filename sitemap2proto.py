@@ -143,7 +143,9 @@ def render_page(node: Node, root: Node) -> str:
     )
 
     # child links = this page's own children, shown as cards
-    if node.children:
+    if node is root:
+        children_block = ""
+    elif node.children:
         cards = "".join(
             f'<a class="card" href="{esc(rel(here, c.out_path))}">'
             f'<span class="card-title">{esc(c.title)}</span>'
