@@ -37,6 +37,7 @@ class Node:
     children: list = field(default_factory=list)
     slug: str = ""        # url-safe name for this page's folder
     out_path: str = ""    # where this page's index.html lands, relative to output root
+    is_button: bool = False  # render as a button in the global nav
 
 @dataclass
 class FooterColumn:
@@ -48,6 +49,7 @@ class FooterColumn:
 # 1. PARSE  - markdown nested list  ->  tree
 # --------------------------------------------------------------------------
 LIST_LINE = re.compile(r"^(\s*)[-*+]\s+(.*\S)\s*$")  # indent, then "- title"
+BUTTON_TAG = re.compile(r"\s*\[button\]\s*$", re.IGNORECASE)  # trailing [button] annotation
 
 def parse_markdown(text: str) -> Node:
     """
@@ -67,13 +69,15 @@ def parse_markdown(text: str) -> Node:
         if not m:
             continue                    # ignore headings, prose, blank lines
         indent = len(m.group(1).expandtabs(4))
-        title = m.group(2).strip()
+        raw_title = m.group(2).strip()
+        is_button = bool(BUTTON_TAG.search(raw_title))
+        title = BUTTON_TAG.sub("", raw_title).strip()
 
         while stack[-1][0] >= indent:   # pop back to our parent
             stack.pop()
         parent = stack[-1][1]
 
-        node = Node(title=title, parent=parent)
+        node = Node(title=title, parent=parent, is_button=is_button)
         parent.children.append(node)
         stack.append((indent, node))
 
@@ -249,8 +253,11 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
     if dropdown_depth > 0:
         nav_items = ""
         for c in root.children:
-            is_active = "active" if c is section_of_node else ""
-            link = f'<a class="{is_active}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+            classes = " ".join(filter(None, [
+                "active" if c is section_of_node else "",
+                "nav-btn" if c.is_button else "",
+            ]))
+            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
             if c.children:
                 sub = nav_dropdown(c.children, here, dropdown_depth)
                 nav_items += f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>'
@@ -258,7 +265,7 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
                 nav_items += link
     else:
         nav_items = "".join(
-            f'<a class="{"active" if c is section_of_node else ""}" '
+            f'<a class="{" ".join(filter(None, ["active" if c is section_of_node else "", "nav-btn" if c.is_button else ""])) }" '
             f'href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
             for c in root.children
         )
@@ -372,6 +379,9 @@ a{color:var(--accent); text-decoration:none}
 }
 .globalnav a:hover{background:rgba(255,255,255,.1); color:#fff}
 .globalnav a.active{background:var(--accent); color:#fff}
+.globalnav a.nav-btn{border:1px solid rgba(255,255,255,.4); color:#fff; padding:5px 14px}
+.globalnav a.nav-btn:hover{background:rgba(255,255,255,.15); border-color:rgba(255,255,255,.7)}
+.globalnav a.nav-btn.active{background:var(--accent); border-color:var(--accent)}
 .nav-item{position:relative; display:inline-flex}
 .nav-item>.dropdown,.has-flyout>.flyout{
   display:none; position:absolute;

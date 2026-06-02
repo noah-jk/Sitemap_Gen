@@ -41,6 +41,22 @@ navigation; `index.html` is a generated landing page.
 Lines that aren't list items (headings, blank lines, `#` comments) are ignored,
 so you can annotate the file freely.
 
+### Button links
+
+Append `[button]` to any nav item to render it as a visually distinct button
+in the global navigation bar:
+
+```md
+- About
+- Products
+- Contact [button]
+```
+
+The `[button]` tag is stripped from the page title — the generated page is still
+called "Contact". The annotation works at any depth in the tree, but only items
+that appear in the top-level nav (direct children of root) are rendered as
+buttons; deeper items are plain links regardless.
+
 ## How it works
 
 Three stages with a hard wall between them:
