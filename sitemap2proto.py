@@ -174,9 +174,11 @@ def render_page(node: Node, root: Node) -> str:
   <a class="brand" href="{esc(home_link)}">SITEMAP PROTO</a>
   <nav class="globalnav">{nav_items}</nav>
 </header>
+<div class="page-banner">
+  <h1>{esc(node.title)}</h1>
+</div>
 <div class="breadcrumb">{crumb_html}</div>
 <main>
-  <h1>{esc(node.title)}</h1>
   {children_block}
   <section class="content">
     <h2>Page content (wireframe)</h2>
@@ -216,8 +218,16 @@ a{color:var(--accent); text-decoration:none}
   border-bottom:1px solid var(--line); background:#fff;
 }
 .breadcrumb span{opacity:.5; margin:0 2px}
+.page-banner{
+  height:250px; display:flex; align-items:center;
+  padding:0 22px; background:#141920;
+  border-bottom:1px solid var(--line);
+}
+.page-banner h1{
+  max-width:880px; width:100%; margin:0 auto;
+  font-size:32px; color:#fff;
+}
 main{max-width:880px; margin:0 auto; padding:32px 22px}
-h1{font-size:26px; margin:0 0 24px}
 h2{font-size:13px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin:0 0 14px}
 .children{margin-bottom:40px}
 .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px}
