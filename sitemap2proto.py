@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sitemap2proto - turn a Markdown nested-list sitemap into a clickable static prototype.
+Sitemap_Gen - turn a Markdown nested-list sitemap into a clickable static prototype.
 
 Usage:
     python3 sitemap2proto.py sitemap.md            # -> ./prototype/

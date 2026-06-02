@@ -1,6 +1,7 @@
 # Generated prototypes (disposable build output — regenerated on every run)
 prototype/
 prototype-*/
+claude.md
 
 # Python
 __pycache__/

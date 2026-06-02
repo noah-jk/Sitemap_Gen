@@ -1,4 +1,4 @@
-# sitemap2proto
+# Sitemap_Gen
 
 Turn a Markdown nested-list sitemap into a clickable static HTML prototype.
 
