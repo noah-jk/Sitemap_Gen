@@ -10,12 +10,12 @@ design happens. Page content is intentionally low-fidelity wireframe placeholder
 ## Usage
 
 ```sh
-python3 sitemap2proto.py sitemap.md            # -> ./prototype/
-python3 sitemap2proto.py sitemap.md out_dir    # custom output folder
-python3 sitemap2proto.py sitemap.md                          # -> ./prototype/
-python3 sitemap2proto.py sitemap.md --nav-style sidebar      # ->  sidebar accordion layout
-python3 sitemap2proto.py sitemap.md --dropdown-depth 2       # ->  2-level flyout nav
-python3 sitemap2proto.py --help                              # ->  full option list
+python3 sitemap2proto.py sitemap.md                     # -> ./prototype/
+python3 sitemap2proto.py sitemap.md out_dir             # custom output folder
+python3 sitemap2proto.py sitemap.md                     # -> ./prototype/
+python3 sitemap2proto.py sitemap.md --nav-style sidebar # ->  sidebar accordion layout
+python3 sitemap2proto.py sitemap.md --dropdown-depth 2  # ->  2-level flyout nav
+python3 sitemap2proto.py --help                         # ->  full option list
 ```
 
 Then open `prototype/index.html`, or serve it for a more realistic feel:
