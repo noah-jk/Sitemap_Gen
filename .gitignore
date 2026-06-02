@@ -1,0 +1,10 @@
+# Generated prototypes (disposable build output — regenerated on every run)
+prototype/
+prototype-*/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
