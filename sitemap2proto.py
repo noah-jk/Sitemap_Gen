@@ -278,7 +278,6 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
 <main>
   {children_block}
   <section class="content">
-    <h2>Page content (wireframe)</h2>
     {skeleton}
   </section>
 </main>
