@@ -11,10 +11,12 @@
   - Widgets
     - Blue Widget
     - Red Widget
+    - Green Widget
   - Gadgets
   - Pricing
 - Resources
   - Blog
+  - Events
   - Docs
   - FAQ
 - Contact

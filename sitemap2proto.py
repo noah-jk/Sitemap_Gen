@@ -124,6 +124,7 @@ def esc(s: str) -> str:
 def render_page(node: Node, root: Node) -> str:
     here = node.out_path
     css = rel(here, "style.css")
+    home_link = rel(here, root.out_path)
 
     # global nav = the root's direct children; mark the active section
     section_of_node = ancestors(node)[1] if node is not root else None
@@ -170,7 +171,7 @@ def render_page(node: Node, root: Node) -> str:
 </head>
 <body>
 <header class="topbar">
-  <span class="brand">SITEMAP PROTO</span>
+  <a class="brand" href="{esc(home_link)}">SITEMAP PROTO</a>
   <nav class="globalnav">{nav_items}</nav>
 </header>
 <div class="breadcrumb">{crumb_html}</div>
@@ -203,7 +204,7 @@ a{color:var(--accent); text-decoration:none}
   padding:14px 22px; background:var(--ink); color:#fff;
   position:sticky; top:0; z-index:10;
 }
-.brand{font-weight:700; letter-spacing:.12em; font-size:12px; opacity:.85}
+.brand{font-weight:700; letter-spacing:.12em; font-size:12px; opacity:.85; color:#fff}
 .globalnav{display:flex; gap:4px; flex-wrap:wrap}
 .globalnav a{
   color:#cbd5e6; padding:6px 12px; border-radius:6px; font-size:13px;
