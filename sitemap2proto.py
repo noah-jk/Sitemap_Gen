@@ -270,6 +270,26 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
             for c in root.children
         )
 
+    # mobile nav: always 2 levels deep, details/summary accordion for items with children
+    mobile_items = ""
+    for c in root.children:
+        cls = " ".join(filter(None, [
+            "active" if c is section_of_node else "",
+            "nav-btn" if c.is_button else "",
+        ]))
+        link_cls = f' class="{cls}"' if cls else ""
+        link = f'<a{link_cls} href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+        if c.children:
+            open_attr = " open" if c is section_of_node else ""
+            children_html = "".join(
+                f'<div class="mob-child"><a href="{esc(rel(here, gc.out_path))}">{esc(gc.title)}</a></div>'
+                for gc in c.children
+            )
+            mobile_items += f'<details{open_attr}><summary>{link}</summary>{children_html}</details>'
+        else:
+            mobile_items += link
+    mobile_nav_html = f'<nav class="mob-nav">{mobile_items}</nav>'
+
     # breadcrumb = the ancestor chain, last one not a link
     crumbs = ancestors(node)
     crumb_html = " <span>/</span> ".join(
@@ -337,6 +357,9 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
 <header class="topbar">
   <a class="brand" href="{esc(home_link)}">SITEMAP PROTO</a>
   <nav class="globalnav">{nav_items}</nav>
+  <button class="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+    <span></span><span></span><span></span>
+  </button>
 </header>
 <div class="page-banner">
   <h1>{esc(node.title)}</h1>
@@ -352,6 +375,23 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
 </main>
 {layout_close}
 <footer>{footer_inner}</footer>
+<div class="mobile-menu" id="mobile-menu" aria-hidden="true">
+  <button class="mob-close" aria-label="Close menu">&#x2715;</button>
+  {mobile_nav_html}
+</div>
+<div class="mobile-overlay" id="mobile-overlay"></div>
+<script>
+(function(){{
+  var btn=document.querySelector('.hamburger');
+  var menu=document.getElementById('mobile-menu');
+  var overlay=document.getElementById('mobile-overlay');
+  function openMenu(){{menu.classList.add('open');overlay.classList.add('open');document.body.classList.add('menu-open');btn.setAttribute('aria-expanded','true');menu.setAttribute('aria-hidden','false');}}
+  function closeMenu(){{menu.classList.remove('open');overlay.classList.remove('open');document.body.classList.remove('menu-open');btn.setAttribute('aria-expanded','false');menu.setAttribute('aria-hidden','true');}}
+  btn.addEventListener('click',openMenu);
+  overlay.addEventListener('click',closeMenu);
+  document.querySelector('.mob-close').addEventListener('click',closeMenu);
+}})();
+</script>
 </body>
 </html>
 """
@@ -475,6 +515,56 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   max-width:880px; margin:24px auto 0; padding-top:16px;
   border-top:1px solid rgba(255,255,255,.1);
   color:rgba(255,255,255,.3); font-size:11px;
+}
+.hamburger{
+  display:none; flex-direction:column; justify-content:space-between;
+  width:22px; height:16px; background:none; border:none;
+  cursor:pointer; padding:0; margin-left:auto; flex-shrink:0;
+}
+.hamburger span{display:block; height:2px; background:#fff; border-radius:2px}
+.mobile-menu{
+  position:fixed; top:0; left:0; height:100%; width:280px;
+  background:var(--ink); z-index:1000; overflow-y:auto;
+  transform:translateX(-100%); transition:transform .25s ease;
+}
+.mobile-overlay{
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,.45); z-index:999;
+}
+.mobile-overlay.open{display:block}
+.mob-close{
+  display:block; margin-left:auto; padding:16px 20px;
+  background:none; border:none; color:rgba(255,255,255,.6);
+  font-size:18px; cursor:pointer; line-height:1;
+}
+.mob-nav a{
+  display:block; padding:13px 22px; color:#cbd5e6; font-size:14px;
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+.mob-nav a:hover,.mob-nav a.active{color:#fff}
+.mob-nav details{border-bottom:1px solid rgba(255,255,255,.07)}
+.mob-nav details summary{
+  list-style:none; padding:13px 22px; color:#cbd5e6;
+  font-size:14px; cursor:pointer;
+}
+.mob-nav details summary::-webkit-details-marker{display:none}
+.mob-nav details summary::after{content:" ›"; float:right; opacity:.4}
+.mob-nav details[open]>summary::after{content:" ↓"}
+.mob-nav details summary a{color:inherit; display:inline}
+.mob-nav .mob-child a{
+  display:block; padding:10px 22px 10px 36px;
+  font-size:13px; color:rgba(255,255,255,.55);
+  border-bottom:1px solid rgba(255,255,255,.05);
+}
+.mob-nav .mob-child a:hover{color:#fff}
+@media(max-width:768px){
+  .globalnav{display:none}
+  .hamburger{display:flex}
+  body{transition:transform .25s ease}
+  body.menu-open{transform:translateX(280px); overflow:hidden}
+  .page-banner h1{font-size:22px}
+  .sidebar{display:none}
+  .page-layout{display:block}
 }
 """
 
