@@ -448,10 +448,10 @@ a{color:var(--accent); text-decoration:none}
   color:#cbd5e6; padding:14px 12px; font-size:13px;
 }
 .globalnav a:hover{background:rgba(255,255,255,.1); color:#fff}
-.globalnav a.active{background:var(--accent); color:#fff}
-.globalnav a.nav-btn{border:1px solid rgba(255,255,255,.4); color:#fff; padding:5px 14px}
+.globalnav a.active{border-bottom:4px solid var(--accent); color:#fff;}
+.globalnav a.nav-btn{background:var(--accent); color:#fff; padding:5px 14px}
 .globalnav a.nav-btn:hover{background:rgba(255,255,255,.15); border-color:rgba(255,255,255,.7)}
-.globalnav a.nav-btn.active{background:var(--accent); border-color:var(--accent)}
+.globalnav a.nav-btn.active{border-bottom:2px solid var(--accent)}
 .nav-item{position:relative; display:flex; align-items:center}
 .nav-item>.dropdown,.has-flyout>.flyout{
   display:none; position:absolute;
@@ -550,6 +550,7 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   display:none; flex-direction:column; justify-content:space-between;
   width:22px; height:16px; background:none; border:none;
   cursor:pointer; padding:0; margin-left:auto; flex-shrink:0;
+  margin-top: 10px; margin-bottom: 10px;
 }
 .hamburger span{display:block; height:2px; background:#fff; border-radius:2px}
 .mobile-menu{
