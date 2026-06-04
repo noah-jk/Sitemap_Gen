@@ -523,9 +523,9 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 }
 .hamburger span{display:block; height:2px; background:#fff; border-radius:2px}
 .mobile-menu{
-  position:fixed; top:0; left:0; height:100%; width:280px;
+  position:fixed; top:0; right:0; height:100%; width:280px;
   background:var(--ink); z-index:1000; overflow-y:auto;
-  transform:translateX(-100%); transition:transform .25s ease;
+  transform:translateX(100%); transition:transform .25s ease;
 }
 .mobile-overlay{
   display:none; position:fixed; inset:0;
@@ -561,7 +561,7 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   .globalnav{display:none}
   .hamburger{display:flex}
   body{transition:transform .25s ease}
-  body.menu-open{transform:translateX(280px); overflow:hidden}
+  body.menu-open{transform:translateX(-280px); overflow:hidden}
   .page-banner h1{font-size:22px}
   .sidebar{display:none}
   .page-layout{display:block}
