@@ -7,6 +7,7 @@ Usage:
     python3 sitemap2proto.py sitemap.md out_dir                  # custom output folder
     python3 sitemap2proto.py sitemap.md --nav-style sidebar      # sidebar accordion layout
     python3 sitemap2proto.py sitemap.md --dropdown-depth 2       # 2-level flyout nav
+    python3 sitemap2proto.py sitemap.md --mega-menu              # full-width column mega menu
     python3 sitemap2proto.py --help                              # full option list
 
 The whole program is three stages with a hard wall between them:
@@ -242,7 +243,22 @@ def nav_dropdown(children: list, here: str, remaining_levels: int) -> str:
             items += f'<li>{link}</li>'
     return items
 
-def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}, nav_style: str = "grid", dropdown_depth: int = 0) -> str:
+def nav_mega_panel(top_node: Node, here: str) -> str:
+    """Build the column-based mega-menu panel for one top-level nav item."""
+    cols = ""
+    for col_node in top_node.children:
+        head = f'<a class="mega-col-head" href="{esc(rel(here, col_node.out_path))}">{esc(col_node.title)}</a>'
+        if col_node.children:
+            links = "".join(
+                f'<li><a href="{esc(rel(here, lc.out_path))}">{esc(lc.title)}</a></li>'
+                for lc in col_node.children
+            )
+            cols += f'<div class="mega-col">{head}<ul>{links}</ul></div>'
+        else:
+            cols += f'<div class="mega-col">{head}</div>'
+    return f'<div class="mega-panel">{cols}</div>'
+
+def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
@@ -250,7 +266,20 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dic
     # global nav = the root's direct children; mark the active section
     anc = ancestors(node)
     section_of_node = anc[1] if len(anc) > 1 else None
-    if dropdown_depth > 0:
+    if mega_menu:
+        nav_items = ""
+        for c in root.children:
+            classes = " ".join(filter(None, [
+                "active" if c is section_of_node else "",
+                "nav-btn" if c.is_button else "",
+            ]))
+            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+            if c.children:
+                panel = nav_mega_panel(c, here)
+                nav_items += f'<div class="nav-item has-mega">{link}{panel}</div>'
+            else:
+                nav_items += link
+    elif dropdown_depth > 0:
         nav_items = ""
         for c in root.children:
             classes = " ".join(filter(None, [
@@ -409,20 +438,21 @@ body{
 a{color:var(--accent); text-decoration:none}
 .topbar{
   display:flex; align-items:center; gap:24px;
-  padding:14px 22px; background:var(--ink); color:#fff;
+  padding:0 22px; background:var(--ink); color:#fff;
   position:sticky; top:0; z-index:10;
 }
 .brand{font-weight:700; letter-spacing:.12em; font-size:12px; opacity:.85; color:#fff}
-.globalnav{display:flex; gap:4px; flex-wrap:wrap}
+.globalnav{display:flex; gap:4px; flex-wrap:wrap; align-self:stretch; align-items:stretch}
+.globalnav>a{display:flex; align-items:center}
 .globalnav a{
-  color:#cbd5e6; padding:6px 12px; border-radius:6px; font-size:13px;
+  color:#cbd5e6; padding:14px 12px; font-size:13px;
 }
 .globalnav a:hover{background:rgba(255,255,255,.1); color:#fff}
 .globalnav a.active{background:var(--accent); color:#fff}
 .globalnav a.nav-btn{border:1px solid rgba(255,255,255,.4); color:#fff; padding:5px 14px}
 .globalnav a.nav-btn:hover{background:rgba(255,255,255,.15); border-color:rgba(255,255,255,.7)}
 .globalnav a.nav-btn.active{background:var(--accent); border-color:var(--accent)}
-.nav-item{position:relative; display:inline-flex}
+.nav-item{position:relative; display:flex; align-items:center}
 .nav-item>.dropdown,.has-flyout>.flyout{
   display:none; position:absolute;
   background:#0d1117; border:1px solid rgba(255,255,255,.12);
@@ -566,13 +596,35 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   .sidebar{display:none}
   .page-layout{display:block}
 }
+.nav-item.has-mega{position:static}
+.mega-panel{
+  display:none; position:absolute; top:100%; left:0; right:0;
+  flex-direction:row; flex-wrap:wrap; gap:40px;
+  background:#0d1117; border-bottom:1px solid rgba(255,255,255,.12);
+  padding:28px 28px; z-index:200;
+}
+.has-mega:hover>.mega-panel{display:flex}
+.mega-col{min-width:140px}
+.mega-col-head{
+  display:block; font-size:11px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.1em;
+  color:rgba(255,255,255,.45); margin-bottom:10px;
+}
+.mega-col-head:hover{color:#fff}
+.mega-col ul{list-style:none; padding:0; margin:0}
+.mega-col li{margin-bottom:6px}
+.mega-col a{color:#cbd5e6; font-size:13px}
+.mega-col a:hover{color:#fff}
+@media(max-width:768px){
+  .mega-panel{display:none!important}
+}
 """
 
 
 # --------------------------------------------------------------------------
 # DRIVER
 # --------------------------------------------------------------------------
-def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: int = 0) -> int:
+def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> int:
     with open(md_path, encoding="utf-8") as f:
         src = f.read()
 
@@ -597,7 +649,7 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: i
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu))
         count += 1
         stack.extend(node.children)
 
@@ -605,7 +657,7 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: i
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu))
         count += 1
 
     return count
@@ -619,8 +671,10 @@ def main() -> None:
                     help="render 'In this section' as a card grid (default) or sidebar accordion")
     ap.add_argument("--dropdown-depth", type=int, default=0, metavar="N",
                     help="levels of dropdown flyout menus in the global nav (0 = flat, default)")
+    ap.add_argument("--mega-menu", action="store_true",
+                    help="full-width mega menu with columns (alternative to --dropdown-depth)")
     args = ap.parse_args()
-    n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth)
+    n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth, args.mega_menu)
     index = os.path.join(args.out_dir, "index.html")
     print(f"Built {n} pages -> {args.out_dir}/")
     print(f"Open: {os.path.abspath(index)}")
