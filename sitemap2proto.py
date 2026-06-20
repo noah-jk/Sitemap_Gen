@@ -408,14 +408,16 @@ def _nav_classes(node: Node, active_node: Optional[Node]) -> str:
         "nav-btn" if node.is_button else "",
     ]))
 
-def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = (), title_index: Optional[Dict[str, Node]] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False, util_items: Sequence[UtilityNavItem] = ()) -> str:
+def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = (), title_index: Optional[Dict[str, Node]] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False, util_items: Sequence[UtilityNavItem] = (), sticky_header: bool = False) -> str:
     title_index = title_index if title_index is not None else {}
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
     utility_nav_html = _build_utility_nav_html(util_items, here, title_index)
-    util_bar_open  = '<div class="header-stack">' if utility_nav_html else ""
-    util_bar_close = "</div>"                      if utility_nav_html else ""
+    sticky_cls     = " is-sticky" if sticky_header else ""
+    util_bar_open  = f'<div class="header-stack{sticky_cls}">' if utility_nav_html else ""
+    util_bar_close = "</div>"                                   if utility_nav_html else ""
+    topbar_cls     = f"topbar{sticky_cls}" if not utility_nav_html else "topbar"
     header_h_style = "<style>:root{--header-h:84px}</style>" if utility_nav_html else ""
 
     anc = ancestors(node)
@@ -452,7 +454,7 @@ def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = ()
 <link rel="stylesheet" href="{esc(css)}">{header_h_style}
 </head>
 <body>
-{util_bar_open}{utility_nav_html}<header class="topbar">
+{util_bar_open}{utility_nav_html}<header class="{topbar_cls}">
   <a class="brand" href="{esc(home_link)}">SITEMAP PROTO</a>
   <nav class="globalnav">{nav_items}</nav>
   <button class="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
@@ -508,7 +510,7 @@ a{color:var(--accent); text-decoration:none}
 .topbar{
   display:flex; align-items:center; gap:24px;
   padding:0 22px; background:var(--ink); color:#fff;
-  position:sticky; top:0; z-index:10;
+  z-index:10;
 }
 .brand{font-weight:700; letter-spacing:.12em; font-size:12px; opacity:.85; color:#fff}
 .globalnav{display:flex; gap:4px; flex-wrap:wrap; align-self:stretch; align-items:stretch}
@@ -691,8 +693,10 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 @media(max-width:768px){
   .mega-panel{display:none!important}
 }
-.header-stack{position:sticky;top:0;z-index:10}
+.header-stack{z-index:10}
 .header-stack .topbar{position:relative}
+.topbar.is-sticky{position:sticky;top:0}
+.header-stack.is-sticky{position:sticky;top:0}
 .utilnav{
   display:flex;align-items:center;gap:2px;justify-content:flex-end;
   padding:0 22px;height:32px;
@@ -930,7 +934,7 @@ def _extract_section(src: str, heading: str) -> Tuple[str, str]:
     return remaining, body
 
 
-def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> int:
+def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False, sticky_header: bool = False) -> int:
     with open(md_path, encoding="utf-8") as f:
         src = f.read()
 
@@ -960,7 +964,7 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: i
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items, sticky_header))
         count += 1
         stack.extend(node.children)
 
@@ -968,7 +972,7 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: i
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items, sticky_header))
         count += 1
 
     with open(os.path.join(out_dir, "sitemap.html"), "w", encoding="utf-8") as f:
@@ -987,10 +991,12 @@ def main() -> None:
                     help="levels of dropdown flyout menus in the global nav (0 = flat, default)")
     ap.add_argument("--mega-menu", action="store_true",
                     help="full-width mega menu with columns (alternative to --dropdown-depth)")
+    ap.add_argument("--sticky-header", action="store_true",
+                    help="make the header stick to the top of the viewport on scroll")
     args = ap.parse_args()
     if args.mega_menu and args.dropdown_depth > 0:
         ap.error("--mega-menu and --dropdown-depth are mutually exclusive")
-    n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth, args.mega_menu)
+    n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth, args.mega_menu, args.sticky_header)
     index = os.path.join(args.out_dir, "index.html")
     visual = os.path.join(args.out_dir, "sitemap.html")
     print(f"Built {n} pages -> {args.out_dir}/")

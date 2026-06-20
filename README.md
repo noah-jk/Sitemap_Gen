@@ -25,6 +25,7 @@ python3 sitemap2proto.py sitemap.md out_dir             # custom output folder
 python3 sitemap2proto.py sitemap.md --nav-style sidebar # sidebar accordion layout
 python3 sitemap2proto.py sitemap.md --dropdown-depth 2  # 2-level flyout nav
 python3 sitemap2proto.py sitemap.md --mega-menu         # full-width column mega menu
+python3 sitemap2proto.py sitemap.md --sticky-header     # keep header fixed on scroll
 python3 sitemap2proto.py --help                         # full option list
 ```
 
@@ -129,6 +130,15 @@ Every build also generates **`prototype/sitemap.html`** — a visual sitemap
 diagram rendered on an HTML canvas. Each node is a clickable box that links to
 its generated page. It gives a bird's-eye view of the full information
 architecture alongside the walkable prototype.
+
+### Options
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--nav-style` | `grid`, `sidebar` | `grid` | How "In this section" renders: a card grid or a sticky sidebar accordion |
+| `--dropdown-depth` | integer ≥ 0 | `0` | Levels of flyout menus in the global nav. `0` = flat links, `1` = single dropdown, `2+` = nested flyouts |
+| `--mega-menu` | flag | off | Full-width mega menu panel with columns. Level 2 = column headers, level 3 = column links. Alternative to `--dropdown-depth` |
+| `--sticky-header` | flag | off | Keep the header fixed at the top of the viewport on scroll |
 
 All prototypes include a **responsive mobile menu**: on narrow screens the
 global nav is replaced by a hamburger button that slides in a full-height panel
