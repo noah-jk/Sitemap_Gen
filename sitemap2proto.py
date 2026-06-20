@@ -268,57 +268,28 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
             cols.append(f'<div class="mega-col">{head}</div>')
     return f'<div class="mega-panel">{"".join(cols)}</div>'
 
-def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Optional[dict] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
-    title_index = title_index if title_index is not None else {}
-    here = node.out_path
-    css = rel(here, "style.css")
-    home_link = rel(here, root.out_path)
-
-    # global nav = the root's direct children; mark the active section
-    anc = ancestors(node)
-    section_of_node = anc[1] if len(anc) > 1 else None
-    if mega_menu:
-        nav_parts = []
-        for c in root.children:
-            classes = " ".join(filter(None, [
-                "active" if c is section_of_node else "",
-                "nav-btn" if c.is_button else "",
-            ]))
-            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-            if c.children:
-                panel = nav_mega_panel(c, here)
-                nav_parts.append(f'<div class="nav-item has-mega">{link}{panel}</div>')
-            else:
-                nav_parts.append(link)
-        nav_items = "".join(nav_parts)
-    elif dropdown_depth > 0:
-        nav_parts = []
-        for c in root.children:
-            classes = " ".join(filter(None, [
-                "active" if c is section_of_node else "",
-                "nav-btn" if c.is_button else "",
-            ]))
-            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-            if c.children:
-                sub = nav_dropdown(c.children, here, dropdown_depth)
-                nav_parts.append(f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>')
-            else:
-                nav_parts.append(link)
-        nav_items = "".join(nav_parts)
-    else:
-        nav_items = "".join(
-            f'<a class="{" ".join(filter(None, ["active" if c is section_of_node else "", "nav-btn" if c.is_button else ""])) }" '
-            f'href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-            for c in root.children
+def _build_footer_inner(footer_cols: list, here: str, title_index: dict) -> str:
+    if footer_cols:
+        col_htmls = []
+        for col in footer_cols:
+            items = "".join(
+                f'<li><a href="{esc(rel(here, n.out_path) if (n := title_index.get(lt)) else "#")}">'
+                f'{esc(lt)}</a></li>'
+                for lt in col.links
+            )
+            col_htmls.append(
+                f'<div class="footer-col"><h3>{esc(col.label)}</h3><ul>{items}</ul></div>'
+            )
+        return (
+            f'<div class="footer-cols">{"".join(col_htmls)}</div>'
+            f'<div class="footer-path"><code>{esc(here)}</code></div>'
         )
+    return f'<code>{esc(here)}</code>'
 
-    # mobile nav: always 2 levels deep, details/summary accordion for items with children
+def _build_mobile_nav(root: Node, here: str, section_of_node: Optional[Node]) -> str:
     mob_parts = []
     for c in root.children:
-        cls = " ".join(filter(None, [
-            "active" if c is section_of_node else "",
-            "nav-btn" if c.is_button else "",
-        ]))
+        cls = _nav_classes(c, section_of_node)
         link_cls = f' class="{cls}"' if cls else ""
         link = f'<a{link_cls} href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
         if c.children:
@@ -330,17 +301,9 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Opt
             mob_parts.append(f'<details{open_attr}><summary>{link}</summary>{children_html}</details>')
         else:
             mob_parts.append(link)
-    mobile_nav_html = f'<nav class="mob-nav">{"".join(mob_parts)}</nav>'
+    return f'<nav class="mob-nav">{"".join(mob_parts)}</nav>'
 
-    # breadcrumb = the ancestor chain, last one not a link
-    crumbs = ancestors(node)
-    crumb_html = " <span>/</span> ".join(
-        esc(c.title) if c is node
-        else f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-        for c in crumbs
-    )
-
-    # child links / sidebar
+def _build_children_block(node: Node, root: Node, here: str, anc: list, nav_style: str) -> tuple:
     sidebar_html = ""
     if node is root:
         children_block = ""
@@ -357,28 +320,69 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Opt
         children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
     else:
         children_block = '<section class="children leaf"><h2>Leaf page</h2><p>No sub-pages. This is a destination.</p></section>'
-
     layout_open  = '<div class="page-layout">' if sidebar_html else ""
     layout_close = "</div>"                    if sidebar_html else ""
+    return sidebar_html, children_block, layout_open, layout_close
 
-    # footer columns: resolve link titles to URLs
-    if footer_cols:
-        col_htmls = []
-        for col in footer_cols:
-            items = "".join(
-                f'<li><a href="{esc(rel(here, n.out_path) if (n := title_index.get(lt)) else "#")}">'
-                f'{esc(lt)}</a></li>'
-                for lt in col.links
-            )
-            col_htmls.append(
-                f'<div class="footer-col"><h3>{esc(col.label)}</h3><ul>{items}</ul></div>'
-            )
-        footer_inner = (
-            f'<div class="footer-cols">{"".join(col_htmls)}</div>'
-            f'<div class="footer-path"><code>{esc(here)}</code></div>'
-        )
+def _build_global_nav(root: Node, here: str, section_of_node: Optional[Node], mega_menu: bool, dropdown_depth: int) -> str:
+    if mega_menu:
+        nav_parts = []
+        for c in root.children:
+            classes = _nav_classes(c, section_of_node)
+            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+            if c.children:
+                panel = nav_mega_panel(c, here)
+                nav_parts.append(f'<div class="nav-item has-mega">{link}{panel}</div>')
+            else:
+                nav_parts.append(link)
+        return "".join(nav_parts)
+    elif dropdown_depth > 0:
+        nav_parts = []
+        for c in root.children:
+            classes = _nav_classes(c, section_of_node)
+            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+            if c.children:
+                sub = nav_dropdown(c.children, here, dropdown_depth)
+                nav_parts.append(f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>')
+            else:
+                nav_parts.append(link)
+        return "".join(nav_parts)
     else:
-        footer_inner = f'<code>{esc(here)}</code>'
+        return "".join(
+            f'<a class="{_nav_classes(c, section_of_node)}" '
+            f'href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+            for c in root.children
+        )
+
+def _nav_classes(node: Node, active_node: Optional[Node]) -> str:
+    return " ".join(filter(None, [
+        "active" if node is active_node else "",
+        "nav-btn" if node.is_button else "",
+    ]))
+
+def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Optional[dict] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
+    title_index = title_index if title_index is not None else {}
+    here = node.out_path
+    css = rel(here, "style.css")
+    home_link = rel(here, root.out_path)
+
+    anc = ancestors(node)
+    section_of_node = anc[1] if len(anc) > 1 else None
+    nav_items = _build_global_nav(root, here, section_of_node, mega_menu, dropdown_depth)
+
+    mobile_nav_html = _build_mobile_nav(root, here, section_of_node)
+
+    # breadcrumb = the ancestor chain, last one not a link
+    crumbs = anc
+    crumb_html = " <span>/</span> ".join(
+        esc(c.title) if c is node
+        else f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+        for c in crumbs
+    )
+
+    sidebar_html, children_block, layout_open, layout_close = _build_children_block(node, root, here, anc, nav_style)
+
+    footer_inner = _build_footer_inner(footer_cols, here, title_index)
 
     # deliberately low-fidelity placeholder body
     skeleton = (
