@@ -326,11 +326,13 @@ def _build_footer_inner(footer_cols: Sequence[FooterColumn], here: str, title_in
             col_htmls.append(
                 f'<div class="footer-col"><h3>{esc(col.label)}</h3><ul>{items}</ul></div>'
             )
+        sitemap_link = f'<a class="footer-sitemap-link" href="{esc(rel(here, "sitemap.html"))}">Visual sitemap</a>'
         return (
             f'<div class="footer-cols">{"".join(col_htmls)}</div>'
-            f'<div class="footer-path"><code>{esc(here)}</code></div>'
+            f'<div class="footer-path"><code>{esc(here)}</code>{sitemap_link}</div>'
         )
-    return f'<code>{esc(here)}</code>'
+    sitemap_link = f'<a class="footer-sitemap-link" href="{esc(rel(here, "sitemap.html"))}">Visual sitemap</a>'
+    return f'<div class="footer-path"><code>{esc(here)}</code>{sitemap_link}</div>'
 
 def _build_mobile_nav(root: Node, here: str, section_of_node: Optional[Node]) -> str:
     mob_parts = []
@@ -612,7 +614,10 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   max-width:880px; margin:24px auto 0; padding-top:16px;
   border-top:1px solid rgba(255,255,255,.1);
   color:rgba(255,255,255,.3); font-size:11px;
+  display:flex; justify-content:space-between; align-items:center;
 }
+.footer-sitemap-link{color:rgba(255,255,255,.3); font-size:11px}
+.footer-sitemap-link:hover{color:rgba(255,255,255,.7)}
 .hamburger{
   display:none; flex-direction:column; justify-content:space-between;
   width:22px; height:16px; background:none; border:none;
