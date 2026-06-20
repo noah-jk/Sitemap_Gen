@@ -678,7 +678,7 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   background:#0d1117; border-bottom:1px solid rgba(255,255,255,.12);
   padding:28px 28px; z-index:200;
 }
-.has-mega:hover>.mega-panel{display:flex}
+.has-mega:hover>.mega-panel{display:flex;justify-content:flex-end;}
 .mega-col{min-width:140px}
 .mega-col-head{
   display:block; font-size:11px; font-weight:700;
@@ -694,7 +694,7 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   .mega-panel{display:none!important}
 }
 .header-stack{z-index:10}
-.header-stack .topbar{position:relative}
+.header-stack .topbar{position:relative;justify-content: space-between;}
 .topbar.is-sticky{position:sticky;top:0}
 .header-stack.is-sticky{position:sticky;top:0}
 .utilnav{
