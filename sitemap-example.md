@@ -43,3 +43,14 @@
   - FAQ
 - Connect
   - Contact
+
+## Utility Nav
+# Top-level bullets are links. Add children to create a simple one-level dropdown.
+# Titles that match pages in the main sitemap link there.
+# New titles get their own generated pages (real URL, not in the global nav).
+
+- Help
+  - Getting Started
+  - FAQs
+- Login
+- Register

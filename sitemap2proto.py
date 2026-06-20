@@ -48,6 +48,11 @@ class FooterColumn:
     label: str
     links: List[str] = field(default_factory=list)
 
+@dataclass
+class UtilityNavItem:
+    label: str
+    children: List[str] = field(default_factory=list)
+
 
 def _tree_to_dict(node: Node) -> Dict[str, object]:
     return {
@@ -95,6 +100,20 @@ def parse_markdown(text: str) -> Node:
 
     return root
 
+
+def parse_utility_nav(text: str) -> List[UtilityNavItem]:
+    items: List[UtilityNavItem] = []
+    for raw in text.splitlines():
+        m = LIST_LINE.match(raw)
+        if not m:
+            continue
+        indent = len(m.group(1).expandtabs(4))
+        title = m.group(2).strip()
+        if indent == 0:
+            items.append(UtilityNavItem(label=title))
+        elif items:
+            items[-1].children.append(title)
+    return items
 
 def parse_footer(text: str) -> List[FooterColumn]:
     """
@@ -156,6 +175,27 @@ def build_title_index(root: Node) -> Dict[str, Node]:
         index[n.title] = n
         stack.extend(n.children)
     return index
+
+def resolve_utility_nav_nodes(util_items: List[UtilityNavItem], title_index: Dict[str, Node], root: Node) -> List[Node]:
+    used_slugs = {c.slug for c in root.children}
+    extra: List[Node] = []
+    all_titles = (
+        [item.label for item in util_items]
+        + [child for item in util_items for child in item.children]
+    )
+    for lt in all_titles:
+        if lt in title_index:
+            continue
+        base = slugify(lt)
+        slug, n = base, 1
+        while slug in used_slugs:
+            n += 1
+            slug = f"{base}-{n}"
+        used_slugs.add(slug)
+        node = Node(title=lt, slug=slug, out_path=f"{slug}/index.html")
+        extra.append(node)
+        title_index[lt] = node
+    return extra
 
 def resolve_footer_nodes(footer_cols: List[FooterColumn], title_index: Dict[str, Node], root: Node) -> List[Node]:
     """
@@ -253,6 +293,27 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
             cols.append(f'<div class="mega-col">{head}</div>')
     return f'<div class="mega-panel">{"".join(cols)}</div>'
 
+def _build_utility_nav_html(util_items: Sequence[UtilityNavItem], here: str, title_index: Dict[str, Node]) -> str:
+    if not util_items:
+        return ""
+    parts = []
+    for item in util_items:
+        href = esc(rel(here, n.out_path) if (n := title_index.get(item.label)) else "#")
+        link = f'<a href="{href}">{esc(item.label)}</a>'
+        if item.children:
+            child_items = "".join(
+                f'<li><a href="{esc(rel(here, n.out_path) if (n := title_index.get(ct)) else "#")}">'
+                f'{esc(ct)}</a></li>'
+                for ct in item.children
+            )
+            parts.append(
+                f'<div class="util-item has-util-drop">{link}'
+                f'<ul class="util-drop">{child_items}</ul></div>'
+            )
+        else:
+            parts.append(f'<a class="util-item" href="{href}">{esc(item.label)}</a>')
+    return f'<nav class="utilnav">{"".join(parts)}</nav>'
+
 def _build_footer_inner(footer_cols: Sequence[FooterColumn], here: str, title_index: Dict[str, Node]) -> str:
     if footer_cols:
         col_htmls = []
@@ -345,11 +406,15 @@ def _nav_classes(node: Node, active_node: Optional[Node]) -> str:
         "nav-btn" if node.is_button else "",
     ]))
 
-def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = (), title_index: Optional[Dict[str, Node]] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
+def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = (), title_index: Optional[Dict[str, Node]] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False, util_items: Sequence[UtilityNavItem] = ()) -> str:
     title_index = title_index if title_index is not None else {}
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
+    utility_nav_html = _build_utility_nav_html(util_items, here, title_index)
+    util_bar_open  = '<div class="header-stack">' if utility_nav_html else ""
+    util_bar_close = "</div>"                      if utility_nav_html else ""
+    header_h_style = "<style>:root{--header-h:84px}</style>" if utility_nav_html else ""
 
     anc = ancestors(node)
     section_of_node = anc[1] if len(anc) > 1 else None
@@ -382,16 +447,16 @@ def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = ()
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(node.title)} - prototype</title>
-<link rel="stylesheet" href="{esc(css)}">
+<link rel="stylesheet" href="{esc(css)}">{header_h_style}
 </head>
 <body>
-<header class="topbar">
+{util_bar_open}{utility_nav_html}<header class="topbar">
   <a class="brand" href="{esc(home_link)}">SITEMAP PROTO</a>
   <nav class="globalnav">{nav_items}</nav>
   <button class="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
     <span></span><span></span><span></span>
   </button>
-</header>
+</header>{util_bar_close}
 <div class="page-banner">
   <h1>{esc(node.title)}</h1>
 </div>
@@ -504,8 +569,8 @@ h2{font-size:13px; text-transform:uppercase; letter-spacing:.1em; color:var(--mu
 .page-layout{display:flex; align-items:flex-start}
 .page-layout main{flex:1; max-width:none; min-width:0}
 .sidebar{
-  width:240px; flex-shrink:0; position:sticky; top:52px;
-  height:calc(100vh - 52px); overflow-y:auto;
+  width:240px; flex-shrink:0; position:sticky; top:var(--header-h,52px);
+  height:calc(100vh - var(--header-h,52px)); overflow-y:auto;
   border-right:1px solid var(--line); background:#fff;
 }
 .sidebar-section-title{
@@ -621,6 +686,28 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 @media(max-width:768px){
   .mega-panel{display:none!important}
 }
+.header-stack{position:sticky;top:0;z-index:10}
+.header-stack .topbar{position:relative}
+.utilnav{
+  display:flex;align-items:center;gap:2px;justify-content:flex-end;
+  padding:0 22px;height:32px;
+  background:var(--paper);border-bottom:1px solid var(--line);
+}
+.util-item{font-size:11px;color:var(--muted);padding:0 10px;line-height:32px;white-space:nowrap;text-decoration:none}
+.util-item:hover{color:var(--ink)}
+.util-item.has-util-drop{position:relative;display:flex;align-items:center}
+.has-util-drop>a{font-size:11px;color:var(--muted);padding:0 10px;line-height:32px;white-space:nowrap}
+.has-util-drop>a:hover{color:var(--ink)}
+.util-drop{
+  display:none;position:absolute;top:100%;right:0;
+  background:#fff;border:1px solid var(--line);border-radius:6px;
+  padding:4px 0;min-width:140px;list-style:none;margin:0;z-index:200;
+  box-shadow:0 4px 12px rgba(0,0,0,.08);
+}
+.has-util-drop:hover>.util-drop{display:block}
+.util-drop a{display:block;padding:6px 14px;font-size:12px;color:var(--ink);white-space:nowrap}
+.util-drop a:hover{color:var(--accent)}
+@media(max-width:768px){.utilnav{display:none}}
 """
 
 
@@ -823,18 +910,36 @@ def render_visual_sitemap(root: Node) -> str:
 # --------------------------------------------------------------------------
 # DRIVER
 # --------------------------------------------------------------------------
+def _extract_section(src: str, heading: str) -> Tuple[str, str]:
+    """Remove a named ## section from src. Returns (remaining_src, section_body)."""
+    m = re.search(
+        r"^##\s+" + re.escape(heading) + r"\s*$",
+        src, re.IGNORECASE | re.MULTILINE
+    )
+    if not m:
+        return src, ""
+    after = src[m.end():]
+    nxt = re.search(r"^##\s+\S", after, re.MULTILINE)
+    body = after[:nxt.start()] if nxt else after
+    remaining = src[:m.start()] + (after[nxt.start():] if nxt else "")
+    return remaining, body
+
+
 def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> int:
     with open(md_path, encoding="utf-8") as f:
         src = f.read()
 
-    parts = re.split(r"^##\s+footer\s*$", src, maxsplit=1, flags=re.IGNORECASE | re.MULTILINE)
-    sitemap_src = parts[0]
-    footer_src = parts[1] if len(parts) > 1 else ""
-    root = parse_markdown(sitemap_src)
+    src, footer_src = _extract_section(src, "Footer")
+    src, util_src   = _extract_section(src, "Utility Nav")
+    sitemap_src = src
+    root        = parse_markdown(sitemap_src)
     footer_cols = parse_footer(footer_src)
+    util_items  = parse_utility_nav(util_src)
     assign_paths(root)
-    title_index = build_title_index(root)
-    footer_only = resolve_footer_nodes(footer_cols, title_index, root)
+    title_index  = build_title_index(root)
+    footer_only  = resolve_footer_nodes(footer_cols, title_index, root)
+    util_only    = resolve_utility_nav_nodes(util_items, title_index, root)
+    extra_nodes  = footer_only + util_only
 
     if os.path.exists(out_dir):
         shutil.rmtree(out_dir)
@@ -850,15 +955,15 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: i
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items))
         count += 1
         stack.extend(node.children)
 
-    for node in footer_only:
+    for node in extra_nodes:
         dest = os.path.join(out_dir, node.out_path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu))
+            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items))
         count += 1
 
     with open(os.path.join(out_dir, "sitemap.html"), "w", encoding="utf-8") as f:
