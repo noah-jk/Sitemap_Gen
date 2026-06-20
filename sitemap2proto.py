@@ -27,7 +27,7 @@ import json
 import shutil
 import argparse
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 # --------------------------------------------------------------------------
@@ -37,7 +37,7 @@ from typing import Optional
 class Node:
     title: str
     parent: "Node | None" = None
-    children: list = field(default_factory=list)
+    children: List["Node"] = field(default_factory=list)
     slug: str = ""        # url-safe name for this page's folder
     out_path: str = ""    # where this page's index.html lands, relative to output root
     is_button: bool = False  # render as a button in the global nav
@@ -45,10 +45,10 @@ class Node:
 @dataclass
 class FooterColumn:
     label: str
-    links: list = field(default_factory=list)  # page titles
+    links: List[str] = field(default_factory=list)
 
 
-def _tree_to_dict(node: Node) -> dict:
+def _tree_to_dict(node: Node) -> Dict[str, object]:
     return {
         "title": node.title,
         "path": node.out_path,
@@ -95,7 +95,7 @@ def parse_markdown(text: str) -> Node:
     return root
 
 
-def parse_footer(text: str) -> list:
+def parse_footer(text: str) -> List[FooterColumn]:
     """
     Parse the already-extracted footer block (text after the ## Footer heading).
     Returns up to 4 FooterColumns; top-level items are column headers, children are links.
@@ -146,7 +146,7 @@ def assign_paths(root: Node) -> None:
     walk(root, [])
 
 
-def build_title_index(root: Node) -> dict:
+def build_title_index(root: Node) -> Dict[str, Node]:
     """Flat map of title -> Node for resolving footer links."""
     index: dict[str, Node] = {}
     stack = list(root.children)
@@ -156,7 +156,7 @@ def build_title_index(root: Node) -> dict:
         stack.extend(n.children)
     return index
 
-def resolve_footer_nodes(footer_cols: list, title_index: dict, root: Node) -> list:
+def resolve_footer_nodes(footer_cols: List[FooterColumn], title_index: Dict[str, Node], root: Node) -> List[Node]:
     """
     For any footer link title not already in the sitemap, create a standalone
     Node with its own page. These pages are reachable from the footer but do
@@ -208,7 +208,7 @@ def _on_path_to(candidate: Node, target: Node) -> bool:
         n = n.parent
     return False
 
-def _sidebar_items(nodes: list, here: str, current: Node) -> str:
+def _sidebar_items(nodes: List[Node], here: str, current: Node) -> str:
     parts = []
     for n in nodes:
         cls = ' class="active"' if n is current else ""
@@ -226,7 +226,7 @@ def build_section_sidebar(section_root: Node, here: str, current: Node) -> str:
     title = f'<a class="{cls}" href="{esc(rel(here, section_root.out_path))}">{esc(section_root.title)}</a>'
     return f'<aside class="sidebar">{title}{_sidebar_items(section_root.children, here, current)}</aside>'
 
-def nav_dropdown(children: list, here: str, remaining_levels: int) -> str:
+def nav_dropdown(children: List[Node], here: str, remaining_levels: int) -> str:
     """Recursively build <li> items for a dropdown or flyout panel."""
     items = []
     for c in children:
@@ -253,7 +253,7 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
             cols.append(f'<div class="mega-col">{head}</div>')
     return f'<div class="mega-panel">{"".join(cols)}</div>'
 
-def _build_footer_inner(footer_cols: list, here: str, title_index: dict) -> str:
+def _build_footer_inner(footer_cols: Sequence[FooterColumn], here: str, title_index: Dict[str, Node]) -> str:
     if footer_cols:
         col_htmls = []
         for col in footer_cols:
@@ -288,7 +288,7 @@ def _build_mobile_nav(root: Node, here: str, section_of_node: Optional[Node]) ->
             mob_parts.append(link)
     return f'<nav class="mob-nav">{"".join(mob_parts)}</nav>'
 
-def _build_children_block(node: Node, root: Node, here: str, anc: list, nav_style: str) -> tuple:
+def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], nav_style: str) -> Tuple[str, str, str, str]:
     sidebar_html = ""
     if node is root:
         children_block = ""
@@ -345,7 +345,7 @@ def _nav_classes(node: Node, active_node: Optional[Node]) -> str:
         "nav-btn" if node.is_button else "",
     ]))
 
-def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Optional[dict] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
+def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = (), title_index: Optional[Dict[str, Node]] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
     title_index = title_index if title_index is not None else {}
     here = node.out_path
     css = rel(here, "style.css")
