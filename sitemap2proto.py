@@ -23,6 +23,7 @@ and stages 2 and 3 don't change a line. That separation is the whole point.
 import os
 import re
 import html
+import json
 import shutil
 import argparse
 from dataclasses import dataclass, field
@@ -44,6 +45,14 @@ class Node:
 class FooterColumn:
     label: str
     links: list = field(default_factory=list)  # page titles
+
+
+def _tree_to_dict(node: Node) -> dict:
+    return {
+        "title": node.title,
+        "path": node.out_path,
+        "children": [_tree_to_dict(c) for c in node.children],
+    }
 
 
 # --------------------------------------------------------------------------
@@ -622,6 +631,202 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 """
 
 
+VISUAL_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Visual Sitemap</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f4f6f9;font:13px/1.4 ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#1d2430}
+.toolbar{display:flex;align-items:center;gap:20px;padding:0 24px;height:48px;background:#1d2430;color:#fff;position:sticky;top:0;z-index:10}
+.toolbar h1{margin:0;font-size:12px;font-weight:700;letter-spacing:.12em;color:#fff}
+.toolbar a{color:#8fa3c8;text-decoration:none;font-size:12px}
+.toolbar a:hover{color:#fff}
+.canvas-wrap{overflow:auto;padding:28px 32px;min-height:calc(100vh - 48px)}
+canvas{display:block}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <h1>VISUAL SITEMAP</h1>
+  <a href="index.html">&#8592; Back to prototype</a>
+</div>
+<div class="canvas-wrap"><canvas id="sitemap-canvas"></canvas></div>
+<script>
+const TREE = __TREE_JSON__;
+
+const NW = 150, NH = 34, RADIUS = 6;
+const INDENT = 28, ROW_GAP = 10, COL_GAP = 60;
+const HOME_TO_L1 = 52;
+const PAD = 32;
+
+const PALETTE = [
+  {bg:'#1d2430',border:'#1d2430',text:'#ffffff'},
+  {bg:'#2f5fff',border:'#1a3fd4',text:'#ffffff'},
+  {bg:'#e8edff',border:'#99b0f0',text:'#1d2430'},
+  {bg:'#f0f4ff',border:'#c0cef0',text:'#1d2430'},
+];
+
+function colorFor(depth) {
+  if (depth < 0)  return PALETTE[0];
+  if (depth === 0) return PALETTE[1];
+  if (depth === 1) return PALETTE[2];
+  return PALETTE[3];
+}
+
+function flatten(node, depth, out) {
+  out.push({node, depth});
+  for (const child of node.children) flatten(child, depth + 1, out);
+}
+
+function computeLayout(tree) {
+  const l1list = tree.children;
+  const colData = l1list.map(l1 => {
+    const rows = [];
+    flatten(l1, 0, rows);
+    const maxD = rows.reduce((m, r) => Math.max(m, r.depth), 0);
+    return {rows, colW: NW + maxD * INDENT};
+  });
+
+  let cx = PAD;
+  const colXs = colData.map(cd => { const x = cx; cx += cd.colW + COL_GAP; return x; });
+  const totalColsW = cx - COL_GAP;
+
+  const homeX = Math.round((PAD + totalColsW) / 2 - NW / 2);
+  const homeY = PAD;
+  const L1_Y = homeY + NH + HOME_TO_L1;
+
+  const nodes = [];
+  nodes.push({node: tree, x: homeX, y: homeY, depth: -1, isRoot: true});
+
+  for (let i = 0; i < colData.length; i++) {
+    let y = L1_Y;
+    for (const row of colData[i].rows) {
+      nodes.push({node: row.node, x: colXs[i] + row.depth * INDENT, y, depth: row.depth});
+      y += NH + ROW_GAP;
+    }
+  }
+
+  const totalW = Math.max(totalColsW, homeX + NW) + PAD;
+  const totalH = Math.max(...nodes.map(n => n.y + NH)) + PAD;
+  return {nodes, totalW, totalH};
+}
+
+function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+
+const HIT = [];
+
+function render() {
+  const {nodes, totalW, totalH} = computeLayout(TREE);
+  const dpr = window.devicePixelRatio || 1;
+  const canvas = document.getElementById('sitemap-canvas');
+  canvas.width = totalW * dpr; canvas.height = totalH * dpr;
+  canvas.style.width = totalW + 'px'; canvas.style.height = totalH + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, totalW, totalH);
+
+  const byNode = new Map(nodes.map(n => [n.node, n]));
+
+  // draw connectors first (below boxes)
+  ctx.strokeStyle = '#9bafc8'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+
+  for (const item of nodes) {
+    if (item.isRoot) {
+      const l1items = item.node.children.map(ch => byNode.get(ch)).filter(Boolean);
+      if (!l1items.length) continue;
+      const hcx = item.x + NW / 2;
+      const hby = item.y + NH;
+      const busY = hby + HOME_TO_L1 / 2;
+      // vertical stem from home down to bus
+      ctx.beginPath(); ctx.moveTo(hcx, hby); ctx.lineTo(hcx, busY); ctx.stroke();
+      if (l1items.length > 1) {
+        // horizontal bus spanning all L1 columns
+        const firstCX = l1items[0].x + NW / 2;
+        const lastCX  = l1items[l1items.length - 1].x + NW / 2;
+        ctx.beginPath(); ctx.moveTo(firstCX, busY); ctx.lineTo(lastCX, busY); ctx.stroke();
+        // vertical drops to each L1
+        for (const l1 of l1items) {
+          ctx.beginPath(); ctx.moveTo(l1.x + NW / 2, busY); ctx.lineTo(l1.x + NW / 2, l1.y); ctx.stroke();
+        }
+      } else {
+        ctx.beginPath(); ctx.moveTo(hcx, busY); ctx.lineTo(l1items[0].x + NW / 2, l1items[0].y); ctx.stroke();
+      }
+      continue;
+    }
+
+    if (!item.node.children.length) continue;
+    const children = item.node.children.map(ch => byNode.get(ch)).filter(Boolean);
+    if (!children.length) continue;
+
+    // folder-tree connector: vertical stem + horizontal stubs
+    const stemX = item.x + 12;
+    const lastChild = children[children.length - 1];
+    ctx.beginPath(); ctx.moveTo(stemX, item.y + NH); ctx.lineTo(stemX, lastChild.y + NH / 2); ctx.stroke();
+    for (const ch of children) {
+      ctx.beginPath(); ctx.moveTo(stemX, ch.y + NH / 2); ctx.lineTo(ch.x, ch.y + NH / 2); ctx.stroke();
+    }
+  }
+
+  // draw node boxes
+  ctx.textBaseline = 'middle';
+  ctx.font = '12px ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+  HIT.length = 0;
+
+  for (const item of nodes) {
+    const col = colorFor(item.depth);
+    rrect(ctx, item.x, item.y, NW, NH, RADIUS);
+    ctx.fillStyle = col.bg; ctx.fill();
+    ctx.strokeStyle = col.border; ctx.lineWidth = 1.5; ctx.stroke();
+
+    ctx.fillStyle = col.text;
+    const maxTextW = NW - 20;
+    let lbl = item.node.title;
+    if (ctx.measureText(lbl).width > maxTextW) {
+      while (lbl.length > 1 && ctx.measureText(lbl + '…').width > maxTextW) lbl = lbl.slice(0, -1);
+      lbl += '…';
+    }
+    ctx.fillText(lbl, item.x + 10, item.y + NH / 2);
+    if (item.node.path) HIT.push({x: item.x, y: item.y, path: item.node.path});
+  }
+
+  canvas.onclick = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    for (const h of HIT) {
+      if (mx >= h.x && mx <= h.x + NW && my >= h.y && my <= h.y + NH) {
+        window.location.href = h.path; return;
+      }
+    }
+  };
+  canvas.onmousemove = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    canvas.style.cursor = HIT.some(h => mx >= h.x && mx <= h.x + NW && my >= h.y && my <= h.y + NH)
+      ? 'pointer' : 'default';
+  };
+}
+
+render();
+</script>
+</body>
+</html>
+"""
+
+
+def render_visual_sitemap(root: Node) -> str:
+    return VISUAL_HTML.replace("__TREE_JSON__", json.dumps(_tree_to_dict(root), ensure_ascii=False))
+
+
 # --------------------------------------------------------------------------
 # DRIVER
 # --------------------------------------------------------------------------
@@ -661,6 +866,9 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: i
             f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu))
         count += 1
 
+    with open(os.path.join(out_dir, "sitemap.html"), "w", encoding="utf-8") as f:
+        f.write(render_visual_sitemap(root))
+
     return count
 
 
@@ -677,8 +885,10 @@ def main() -> None:
     args = ap.parse_args()
     n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth, args.mega_menu)
     index = os.path.join(args.out_dir, "index.html")
+    visual = os.path.join(args.out_dir, "sitemap.html")
     print(f"Built {n} pages -> {args.out_dir}/")
-    print(f"Open: {os.path.abspath(index)}")
+    print(f"Open:   {os.path.abspath(index)}")
+    print(f"Visual: {os.path.abspath(visual)}")
 
 
 if __name__ == "__main__":
