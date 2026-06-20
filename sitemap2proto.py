@@ -691,13 +691,13 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 .utilnav{
   display:flex;align-items:center;gap:2px;justify-content:flex-end;
   padding:0 22px;height:32px;
-  background:var(--paper);border-bottom:1px solid var(--line);
+  background:#000;
 }
 .util-item{font-size:11px;color:var(--muted);padding:0 10px;line-height:32px;white-space:nowrap;text-decoration:none}
-.util-item:hover{color:var(--ink)}
+.util-item:hover{color:var(--paper)}
 .util-item.has-util-drop{position:relative;display:flex;align-items:center}
 .has-util-drop>a{font-size:11px;color:var(--muted);padding:0 10px;line-height:32px;white-space:nowrap}
-.has-util-drop>a:hover{color:var(--ink)}
+.has-util-drop>a:hover{color:var(--paper)}
 .util-drop{
   display:none;position:absolute;top:100%;right:0;
   background:#fff;border:1px solid var(--line);border-radius:6px;
