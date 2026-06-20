@@ -27,6 +27,7 @@ import json
 import shutil
 import argparse
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 # --------------------------------------------------------------------------
@@ -267,7 +268,8 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
             cols += f'<div class="mega-col">{head}</div>'
     return f'<div class="mega-panel">{cols}</div>'
 
-def render_page(node: Node, root: Node, footer_cols: list = (), title_index: dict = {}, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
+def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Optional[dict] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
+    title_index = title_index if title_index is not None else {}
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
@@ -883,6 +885,8 @@ def main() -> None:
     ap.add_argument("--mega-menu", action="store_true",
                     help="full-width mega menu with columns (alternative to --dropdown-depth)")
     args = ap.parse_args()
+    if args.mega_menu and args.dropdown_depth > 0:
+        ap.error("--mega-menu and --dropdown-depth are mutually exclusive")
     n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth, args.mega_menu)
     index = os.path.join(args.out_dir, "index.html")
     visual = os.path.join(args.out_dir, "sitemap.html")
