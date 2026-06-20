@@ -224,17 +224,17 @@ def _on_path_to(candidate: Node, target: Node) -> bool:
     return False
 
 def _sidebar_items(nodes: list, here: str, current: Node) -> str:
-    out = ""
+    parts = []
     for n in nodes:
         cls = ' class="active"' if n is current else ""
         link = f'<a{cls} href="{esc(rel(here, n.out_path))}">{esc(n.title)}</a>'
         if n.children:
             open_attr = " open" if _on_path_to(n, current) else ""
             sub = _sidebar_items(n.children, here, current)
-            out += f'<details{open_attr}><summary>{link}</summary>{sub}</details>'
+            parts.append(f'<details{open_attr}><summary>{link}</summary>{sub}</details>')
         else:
-            out += f'<div class="sidebar-leaf">{link}</div>'
-    return out
+            parts.append(f'<div class="sidebar-leaf">{link}</div>')
+    return "".join(parts)
 
 def build_section_sidebar(section_root: Node, here: str, current: Node) -> str:
     cls = "sidebar-section-title active" if section_root is current else "sidebar-section-title"
@@ -243,19 +243,19 @@ def build_section_sidebar(section_root: Node, here: str, current: Node) -> str:
 
 def nav_dropdown(children: list, here: str, remaining_levels: int) -> str:
     """Recursively build <li> items for a dropdown or flyout panel."""
-    items = ""
+    items = []
     for c in children:
         link = f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
         if remaining_levels > 1 and c.children:
             sub = nav_dropdown(c.children, here, remaining_levels - 1)
-            items += f'<li class="has-flyout">{link}<ul class="flyout">{sub}</ul></li>'
+            items.append(f'<li class="has-flyout">{link}<ul class="flyout">{sub}</ul></li>')
         else:
-            items += f'<li>{link}</li>'
-    return items
+            items.append(f'<li>{link}</li>')
+    return "".join(items)
 
 def nav_mega_panel(top_node: Node, here: str) -> str:
     """Build the column-based mega-menu panel for one top-level nav item."""
-    cols = ""
+    cols = []
     for col_node in top_node.children:
         head = f'<a class="mega-col-head" href="{esc(rel(here, col_node.out_path))}">{esc(col_node.title)}</a>'
         if col_node.children:
@@ -263,10 +263,10 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
                 f'<li><a href="{esc(rel(here, lc.out_path))}">{esc(lc.title)}</a></li>'
                 for lc in col_node.children
             )
-            cols += f'<div class="mega-col">{head}<ul>{links}</ul></div>'
+            cols.append(f'<div class="mega-col">{head}<ul>{links}</ul></div>')
         else:
-            cols += f'<div class="mega-col">{head}</div>'
-    return f'<div class="mega-panel">{cols}</div>'
+            cols.append(f'<div class="mega-col">{head}</div>')
+    return f'<div class="mega-panel">{"".join(cols)}</div>'
 
 def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Optional[dict] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False) -> str:
     title_index = title_index if title_index is not None else {}
@@ -278,7 +278,7 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Opt
     anc = ancestors(node)
     section_of_node = anc[1] if len(anc) > 1 else None
     if mega_menu:
-        nav_items = ""
+        nav_parts = []
         for c in root.children:
             classes = " ".join(filter(None, [
                 "active" if c is section_of_node else "",
@@ -287,11 +287,12 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Opt
             link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
             if c.children:
                 panel = nav_mega_panel(c, here)
-                nav_items += f'<div class="nav-item has-mega">{link}{panel}</div>'
+                nav_parts.append(f'<div class="nav-item has-mega">{link}{panel}</div>')
             else:
-                nav_items += link
+                nav_parts.append(link)
+        nav_items = "".join(nav_parts)
     elif dropdown_depth > 0:
-        nav_items = ""
+        nav_parts = []
         for c in root.children:
             classes = " ".join(filter(None, [
                 "active" if c is section_of_node else "",
@@ -300,9 +301,10 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Opt
             link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
             if c.children:
                 sub = nav_dropdown(c.children, here, dropdown_depth)
-                nav_items += f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>'
+                nav_parts.append(f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>')
             else:
-                nav_items += link
+                nav_parts.append(link)
+        nav_items = "".join(nav_parts)
     else:
         nav_items = "".join(
             f'<a class="{" ".join(filter(None, ["active" if c is section_of_node else "", "nav-btn" if c.is_button else ""])) }" '
@@ -311,7 +313,7 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Opt
         )
 
     # mobile nav: always 2 levels deep, details/summary accordion for items with children
-    mobile_items = ""
+    mob_parts = []
     for c in root.children:
         cls = " ".join(filter(None, [
             "active" if c is section_of_node else "",
@@ -325,10 +327,10 @@ def render_page(node: Node, root: Node, footer_cols: list = (), title_index: Opt
                 f'<div class="mob-child"><a href="{esc(rel(here, gc.out_path))}">{esc(gc.title)}</a></div>'
                 for gc in c.children
             )
-            mobile_items += f'<details{open_attr}><summary>{link}</summary>{children_html}</details>'
+            mob_parts.append(f'<details{open_attr}><summary>{link}</summary>{children_html}</details>')
         else:
-            mobile_items += link
-    mobile_nav_html = f'<nav class="mob-nav">{mobile_items}</nav>'
+            mob_parts.append(link)
+    mobile_nav_html = f'<nav class="mob-nav">{"".join(mob_parts)}</nav>'
 
     # breadcrumb = the ancestor chain, last one not a link
     crumbs = ancestors(node)
