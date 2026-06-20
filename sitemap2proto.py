@@ -26,6 +26,7 @@ import html
 import json
 import shutil
 import argparse
+import functools
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -196,8 +197,7 @@ def rel(from_path: str, to_path: str) -> str:
     from_dir = os.path.dirname(from_path) or "."
     return os.path.relpath(to_path, from_dir).replace(os.sep, "/")
 
-def esc(s: str) -> str:
-    return html.escape(s, quote=True)
+esc = functools.partial(html.escape, quote=True)
 
 def _on_path_to(candidate: Node, target: Node) -> bool:
     """True if candidate is target or an ancestor of target."""
