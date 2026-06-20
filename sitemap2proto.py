@@ -95,27 +95,13 @@ def parse_markdown(text: str) -> Node:
     return root
 
 
-FOOTER_HEADING = re.compile(r"^##\s+footer\s*$", re.IGNORECASE)
-
 def parse_footer(text: str) -> list:
     """
-    Extracts the ## Footer section and returns up to 4 FooterColumns.
-    Top-level list items are column headers; their immediate children are link titles.
+    Parse the already-extracted footer block (text after the ## Footer heading).
+    Returns up to 4 FooterColumns; top-level items are column headers, children are links.
     """
-    lines = text.splitlines()
-    in_footer = False
-    footer_lines = []
-    for line in lines:
-        if FOOTER_HEADING.match(line.strip()):
-            in_footer = True
-            continue
-        if in_footer and re.match(r"^##", line):
-            break
-        if in_footer:
-            footer_lines.append(line)
-
     columns: list[FooterColumn] = []
-    for raw in footer_lines:
+    for raw in text.splitlines():
         m = LIST_LINE.match(raw)
         if not m:
             continue
@@ -127,7 +113,6 @@ def parse_footer(text: str) -> list:
             columns.append(FooterColumn(label=title))
         elif columns:
             columns[-1].links.append(title)
-
     return columns
 
 
@@ -842,9 +827,11 @@ def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: i
     with open(md_path, encoding="utf-8") as f:
         src = f.read()
 
-    sitemap_src = re.split(r"^##\s+footer\s*$", src, maxsplit=1, flags=re.IGNORECASE | re.MULTILINE)[0]
+    parts = re.split(r"^##\s+footer\s*$", src, maxsplit=1, flags=re.IGNORECASE | re.MULTILINE)
+    sitemap_src = parts[0]
+    footer_src = parts[1] if len(parts) > 1 else ""
     root = parse_markdown(sitemap_src)
-    footer_cols = parse_footer(src)
+    footer_cols = parse_footer(footer_src)
     assign_paths(root)
     title_index = build_title_index(root)
     footer_only = resolve_footer_nodes(footer_cols, title_index, root)
