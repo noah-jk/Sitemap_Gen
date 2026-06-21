@@ -513,6 +513,22 @@ def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = ()
   btn.addEventListener('click',openMenu);
   overlay.addEventListener('click',closeMenu);
   document.querySelector('.mob-close').addEventListener('click',closeMenu);
+  function fixDrop(menu){{
+    menu.classList.remove('drop-left');
+    var s=menu.style.cssText;
+    menu.style.cssText='display:block!important;visibility:hidden!important;pointer-events:none!important;';
+    var r=menu.getBoundingClientRect();
+    menu.style.cssText=s;
+    if(r.right>window.innerWidth-8)menu.classList.add('drop-left');
+  }}
+  document.querySelectorAll('.nav-item').forEach(function(el){{
+    var d=el.querySelector(':scope>.dropdown');
+    if(d)el.addEventListener('mouseenter',function(){{fixDrop(d);}});
+  }});
+  document.querySelectorAll('.has-flyout').forEach(function(el){{
+    var f=el.querySelector(':scope>.flyout');
+    if(f)el.addEventListener('mouseenter',function(){{fixDrop(f);}});
+  }});
 }})();
 </script>
 </body>
@@ -557,6 +573,8 @@ a{color:var(--accent); text-decoration:none}
 .has-flyout>.flyout{left:100%; top:-6px;}
 .has-flyout{position: relative;}
 .nav-item:hover>.dropdown,.has-flyout:hover>.flyout{display:block;}
+.nav-item>.dropdown.drop-left{left:auto;right:0}
+.has-flyout>.flyout.drop-left{left:auto;right:100%}
 .dropdown a,.flyout a{display:block; padding:8px 16px; border-radius:0; white-space:nowrap}
 .has-flyout>a::after{content:" ›"; opacity:.5; font-size:11px}
 .breadcrumb{
