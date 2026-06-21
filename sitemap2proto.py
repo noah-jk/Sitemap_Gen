@@ -334,7 +334,13 @@ def _build_footer_inner(footer_cols: Sequence[FooterColumn], here: str, title_in
     sitemap_link = f'<a class="footer-sitemap-link" href="{esc(rel(here, "sitemap.html"))}">Visual sitemap</a>'
     return f'<div class="footer-path"><code>{esc(here)}</code>{sitemap_link}</div>'
 
-def _build_mobile_nav(root: Node, here: str, section_of_node: Optional[Node]) -> str:
+def _build_mobile_nav(
+    root: Node,
+    here: str,
+    section_of_node: Optional[Node],
+    util_items: Sequence[UtilityNavItem] = (),
+    title_index: Optional[Dict[str, Node]] = None,
+) -> str:
     mob_parts = []
     for c in root.children:
         cls = _nav_classes(c, section_of_node)
@@ -349,7 +355,24 @@ def _build_mobile_nav(root: Node, here: str, section_of_node: Optional[Node]) ->
             mob_parts.append(f'<details{open_attr}><summary>{link}</summary>{children_html}</details>')
         else:
             mob_parts.append(link)
-    return f'<nav class="mob-nav">{"".join(mob_parts)}</nav>'
+    if util_items:
+        ti = title_index or {}
+        util_parts = []
+        for item in util_items:
+            href = esc(rel(here, n.out_path) if (n := ti.get(item.label)) else "#")
+            link = f'<a href="{href}">{esc(item.label)}</a>'
+            if item.children:
+                children_html = "".join(
+                    f'<div class="mob-util-child"><a href="{esc(rel(here, n.out_path) if (n := ti.get(ct)) else "#")}">{esc(ct)}</a></div>'
+                    for ct in item.children
+                )
+                util_parts.append(f'<details><summary>{link}</summary>{children_html}</details>')
+            else:
+                util_parts.append(f'<a class="mob-util-link" href="{href}">{esc(item.label)}</a>')
+        util_section = f'<div class="mob-util-section">{"".join(util_parts)}</div>'
+    else:
+        util_section = ""
+    return f'<nav class="mob-nav">{"".join(mob_parts)}</nav>{util_section}'
 
 def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], nav_style: str) -> Tuple[str, str, str, str]:
     sidebar_html = ""
@@ -424,7 +447,7 @@ def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = ()
     section_of_node = anc[1] if len(anc) > 1 else None
     nav_items = _build_global_nav(root, here, section_of_node, mega_menu, dropdown_depth)
 
-    mobile_nav_html = _build_mobile_nav(root, here, section_of_node)
+    mobile_nav_html = _build_mobile_nav(root, here, section_of_node, util_items, title_index)
 
     # breadcrumb = the ancestor chain, last one not a link
     crumbs = anc
@@ -662,6 +685,17 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
   border-bottom:1px solid rgba(255,255,255,.05);
 }
 .mob-nav .mob-child a:hover{color:#fff}
+.mob-util-section{border-top:1px solid rgba(255,255,255,.1);margin-top:8px;padding-top:4px}
+.mob-util-section>a.mob-util-link{display:block;padding:9px 22px;font-size:12px;color:rgba(255,255,255,.45);border-bottom:1px solid rgba(255,255,255,.06)}
+.mob-util-section>a.mob-util-link:hover{color:rgba(255,255,255,.75)}
+.mob-util-section details{border-bottom:1px solid rgba(255,255,255,.06)}
+.mob-util-section details summary{list-style:none;padding:9px 22px;font-size:12px;color:rgba(255,255,255,.45);cursor:pointer}
+.mob-util-section details summary::-webkit-details-marker{display:none}
+.mob-util-section details summary::after{content:" ›";float:right;opacity:.4}
+.mob-util-section details[open]>summary::after{content:" ↓"}
+.mob-util-section details summary a{color:inherit;display:inline}
+.mob-util-section .mob-util-child a{display:block;padding:7px 22px 7px 36px;font-size:11px;color:rgba(255,255,255,.3);border-bottom:1px solid rgba(255,255,255,.04)}
+.mob-util-section .mob-util-child a:hover{color:rgba(255,255,255,.6)}
 @media(max-width:768px){
   .globalnav{display:none}
   .hamburger{display:flex}
