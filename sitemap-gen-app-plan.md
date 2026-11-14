@@ -1,6 +1,6 @@
 # Sitemap_Gen App — Plan
 
-Planning doc for turning `Sitemap_Gen` (a CLI that builds clickable prototypes from a Markdown sitemap) into a self-hosted content audit and IA design tool for large higher-ed sites. Written Nov 12, 2026; revised the same day to a database-first, fully self-hosted design.
+Planning doc for turning `Sitemap_Gen` (a CLI that builds clickable prototypes from a Markdown sitemap) into a self-hosted content audit and IA design tool for large higher-ed sites. Written Nov 12, 2026. Revised Nov 14, 2026: one Python app with SQLite instead of NocoDB + Postgres, AI classifier removed, tree test isolated from the main app.
 
 ## Goal
 
@@ -10,22 +10,33 @@ The content audit and the IA redesign are the same data, so one tool covers both
 
 ## Decisions so far
 
+- **One application.** A single Python web app owns the grid, the tree editor, the prototype preview, and exports. No third-party grid service, no iframe embedding of other apps.
+- **Users:** Noah now, possibly one coworker later. The design assumes a handful of users at most, never simultaneous editing by a large team.
+- **SQLite, one database file per client project.** A `projects.db` lists the projects; each project is its own file (`projects/<slug>.db`). Isolation is physical: a forgotten filter can't leak one client's pages into another's export, and archiving or handing off a project is copying a file.
 - **Database is the source of truth.** Markdown stays as import/export and keeps the CLI working.
-- **Separate data per client project** (one Postgres database or schema per project, plus a small `projects` table listing them). Chosen over a shared table with a `project_id` column because a forgotten filter leaking one client's pages into another's export is a quiet failure, while schema drift between project databases is a loud one.
-- **Fully self-hosted.** Local AI model, own tree-test tool, JS libraries vendored into the app. No external APIs. The only outside piece is the client-facing prototype on S3, which is work infrastructure.
-- **One application, many services.** An app shell with tabs and a project picker wraps NocoDB, the tree editor, the prototype preview, and exports.
-- **AI classifier is the last phase.** The tool must be fully useful without it. The schema reserves `ai_*` columns now so adding it later doesn't disturb the human columns.
+- **Fully self-hosted.** JS libraries vendored into the app. No external APIs. Outside pieces: the client-facing prototype on S3 (work infrastructure) and the tree-test page, reached through a Cloudflare Tunnel.
+- **No AI.** Import-time rules plus the extra columns Screaming Frog already provides (near-duplicates, analytics and Search Console traffic) do the sorting. People make every decision in the grid.
+
+### Why not NocoDB + Postgres (the earlier design)
+
+NocoDB would give saved views, link pickers, and multi-user editing for free, but it costs:
+
+- **Security:** stripping clickjacking headers (`X-Frame-Options`, `frame-ancestors`) so it can be iframed, a second login system, and validation rules that can only be checked before export, not on write.
+- **Resources:** a separate Node service plus Postgres on a VM with 3-4GB of RAM.
+- **Complexity:** Postgres was chosen only because two systems would write to the database. With one app, that reason disappears.
+
+For one or two users, building a grid with a library is less total work and a smaller attack surface. If the team ever grows to several people editing at once, the SQL is kept portable so the move to Postgres is a driver change plus a data copy.
 
 ## The core idea: two trees, one table
 
 Every page is a row with two kinds of columns:
 
-- **As-is** (from the crawl): current URL, title, status code, word count, inlinks.
+- **As-is** (from the crawl): current URL, title, status code, word count, inlinks, traffic.
 - **To-be** (decided by a person): disposition, where its content goes, and where it sits in the new navigation.
 
 Two views work on that one table:
 
-- **Spreadsheet grid** (NocoDB or similar) for the long tail: filter, sort, bulk-edit thousands of rows.
+- **Spreadsheet grid** for the long tail: filter, sort, bulk-edit thousands of rows.
 - **Visual tree** for the designed top 2-3 levels, with a roll-up count on each node ("Admissions: 847 pages"). The visual editor never draws thousands of nodes.
 
 Three outputs come from the same rows: the content audit (a client deliverable), the prototype, and the redirect map for launch.
@@ -45,45 +56,49 @@ Three outputs come from the same rows: the content audit (a client deliverable),
 2. Settings aren't stored with the sitemap.
 3. Every page renders as the same wireframe placeholder.
 4. `build_title_index` is keyed by title, so duplicate titles in different sections collide.
-5. Footer and utility-nav parsing code is duplicated.
+5. Footer and utility-nav parsing code is duplicated (and nav-building has three near-identical branches, #5).
 6. `build()` wipes and writes a directory; it can't return a zip or take a settings dict.
 7. Naming is inconsistent across repo, README, and script.
+8. No tests (#6). Snapshot tests come before the refactor.
 
 ## Design principles
 
-- **Own the database, borrow the UI.** The grid tool is a window onto tables the app owns. Only the app changes the schema.
 - **Keep the generator dependency-free.** The web app is a separate layer that imports it.
 - **Human-designed top, imported bottom.** Levels 1-3 are curated; deeper levels come from the crawl.
-- **AI suggests, a human decides.** Suggestions land in columns and are reviewed in the grid.
+- **Validate on write, not just before export.** Every change goes through the app, so the rules run in the same transaction as the edit.
 - **Relationships, not labels.** "Combine" in a notes field can't be checked or exported. A link to the absorbing page can.
-- **Nothing leaves the network** except the finished prototype zip and tree-test answers from participants.
+- **Crawl data is untrusted input.** Titles and H1s come from a website someone else controls. Escape everywhere, render grid cells as text, guard spreadsheet exports against formula injection.
+- **Nothing leaves the network** except the finished prototype zip and tree-test traffic.
 
 ## Architecture
 
 ```
-                 ┌──────────── app shell (sitemap.home) ────────────┐
-                 │  [Project ▾]   Pages | Tree | Prototype | Exports │
-                 └───┬──────────────┬──────────┬──────────┬─────────┘
-                     │ iframe       │ native   │ iframe   │ native
-                  NocoDB        tree editor   static     exports
-                     │              │          files        │
-Screaming Frog ──► importer ──► [ Postgres: one DB/schema per project ] ──► generator
-                                        ▲
-                          (last phase) local model (Ollama) ── batch classifier
+                 ┌──────────────── app (sitemap.home, LAN only) ────────────────┐
+                 │  [Project ▾]   Pages | Tree | Prototype | Exports | Tree test │
+                 │  FastAPI + Jinja templates, Tabulator grid (vendored)         │
+                 └──────┬─────────────────────────────┬──────────────────────────┘
+                        │                             │ imports
+Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ] ──► generator ──► zip
+                                                      │
+                  app ──► publish labels-only snapshot ──► tree-test admin port (LAN only)
+                  app ◄── pull results ◄────────────────── tree-test admin port (LAN only)
+                                                      │
+                 ┌─────────── tree-test service (separate container) ───────────┐
+                 │  own SQLite, no access to project files                      │
+                 └──────────────────────────┬───────────────────────────────────┘
+                                            │ public routes only
+                                   cloudflared tunnel ──► participants
 ```
 
-- **Postgres** over SQLite, because the grid tool and the custom app both write.
-- **NocoDB** is the leading grid candidate because it can sit on an existing database. Baserow and Grist are alternatives. **Verify** license terms, performance at real crawl sizes, and that it works against app-owned tables and a chosen Postgres schema.
-- **App shell:** one page owns the top bar, tabs, and project picker. NocoDB and the prototype load in iframes; the tree editor and exports are native. The project picker must switch every tab at once (right NocoDB base, right tree, right prototype folder), usually by passing the project in the URL.
-- **Local AI (later):** Ollama (or similar) behind a single configurable endpoint URL, so the model can move from the Beelink to a bigger box without code changes.
-- Everything in Docker on VM 101, behind Nginx Proxy Manager with `.home` names under one parent domain (so iframe cookies work). LAN-only; bind published ports to the LAN IP, not `0.0.0.0`.
-- VM 101 had roughly 3-4GB of RAM available when last checked. Measure NocoDB plus Postgres before committing. A local model, when it arrives, may need to run only during batch jobs.
-
-### Embedding gotchas (check early)
-
-- Apps often send `X-Frame-Options` or `Content-Security-Policy: frame-ancestors` headers that block iframes (clickjacking protection). NPM can strip and replace them per proxy host, allowing framing only from the shell's own origin. Check response headers before and after.
-- Login inside an iframe can fail if the browser treats the frame as a different site. Keeping all services under the same `.home` parent usually avoids this. Test NocoDB login inside a frame first.
-- Fallback if embedding fights back: same top bar on custom pages, NocoDB opens in its own browser tab. Bigger fallback: replace NocoDB with a JS grid library (Tabulator, AG Grid) inside the app.
+- **Stack:** FastAPI (Pydantic validation at every input boundary, which matters most for the public tree-test endpoint) with server-rendered Jinja pages and small JSON endpoints for the grid. The generator is imported as a library, so everything is one language.
+- **Grid:** Tabulator (MIT), vendored. Remote pagination, sorting, and filtering, so the browser only holds one page of rows. Cells use the plain-text formatter, never HTML.
+- **SQLite settings:** WAL mode, `foreign_keys=ON`, `busy_timeout` set. Migrations versioned with `PRAGMA user_version` and run across every project file on startup.
+- **Auth:** single login with a session cookie (`HttpOnly`, `SameSite=Strict`, `Secure` behind the proxy), CSRF token on forms. A `users` table from day one, so adding a coworker is a row, not a redesign.
+- **Concurrent edits (for the coworker case):** each row carries `updated_at`; a save that doesn't match the stored value is rejected and the grid reloads the row. No silent last-write-wins.
+- **Prototype preview:** served by the app itself and shown in an `<iframe sandbox="allow-scripts">` (no `allow-same-origin`), with a strict CSP on prototype responses. Generated pages can't touch the app's session even if escaping ever slipped.
+- **Deployment:** Docker on VM 101: `app`, `treetest`, `cloudflared`. The app sits behind Nginx Proxy Manager with a `.home` name, ports bound to the LAN IP, not `0.0.0.0`.
+- **Backups:** nightly `VACUUM INTO` (or the `sqlite3 .backup` command) per project file. Never `cp` a live database in WAL mode.
+- **Resources:** the app is one Python process. RAM is no longer a constraint on VM 101.
 
 ## Data model
 
@@ -92,26 +107,35 @@ Screaming Frog ──► importer ──► [ Postgres: one DB/schema per projec
 | Column | Purpose |
 |---|---|
 | `id` | Stable identity. Everything links by ID, never by title. |
-| `current_url` | Empty for planned pages. |
+| `current_url` | Unique when set. Empty for planned pages. |
 | `is_new` | True for pages that don't exist yet (often the absorber in a combine). |
-| crawl columns | Title, H1, status code, word count, inlinks, crawl depth. |
-| `disposition` | `keep` / `delete` / `review` / `combine` / `split` |
-| `redirect_to` | Link to one row: where the old URL sends visitors. |
-| `content_goes_to` | Link to several rows. Only needed for `split`. |
+| crawl columns | Title, H1, status code, indexability, word count, inlinks, crawl depth. |
+| traffic columns | Sessions (GA4) and clicks/impressions (Search Console), via Screaming Frog's API connections. Optional. |
+| duplicate columns | Screaming Frog's near-duplicate count and closest similarity match. Optional. |
+| `disposition` | `keep` / `delete` / `review` / `combine` / `split` (`CHECK` constraint). |
+| `redirect_to` | Foreign key to one row: where the old URL sends visitors. |
 | `status` | `proposed` / `approved` / `done`. Progress, kept separate from disposition. |
 | `notes` | Free text, such as what content to carry over. |
 | `parent_id`, `sort_order` | Position in the **new** navigation tree. |
 | `path` | Stored path such as `/admissions/apply/`, so the grid can sort and indent. |
 | `provenance` | `designed` / `imported` / `proposed` |
 | `page_type` | Landing, listing, article, form. |
-| `ai_page_type`, `ai_disposition`, `ai_target`, `ai_confidence` | Reserved for classifier suggestions (last phase), separate from the human columns. Empty until then. |
 | `flags` | Button, hidden from nav. |
+| `updated_at` | Used to detect conflicting edits. |
 
-Project-level settings live in the `projects` table: nav style, dropdown depth, mega menu, sticky header, footer columns, utility nav, version label.
+### `page_content_targets` (join table, for `split`)
+
+`(page_id, target_id)`, both foreign keys to `pages`. This is the "content goes to several pages" link, which a single column can't hold.
+
+### Other tables
+
+- **`settings`** (one row per project file): nav style, dropdown depth, mega menu, sticky header, footer columns, utility nav, version label.
+- **`views`**: saved grid views as filter and sort JSON (by section, by disposition, problems, near-duplicates).
+- **`projects.db`**: project list (slug, client name, created) and `users`.
 
 ### How each disposition uses the links
 
-| Disposition | `redirect_to` | `content_goes_to` | Meaning |
+| Disposition | `redirect_to` | content targets | Meaning |
 |---|---|---|---|
 | keep | empty | empty | Page survives. |
 | delete | optional | empty | With a target: redirect. Without: let it 404. |
@@ -124,24 +148,25 @@ Project-level settings live in the `projects` table: nav style, dropdown depth, 
 1. `combine` and `split` must have a `redirect_to`.
 2. A row can't target itself.
 3. A target can't itself be deleted or combined away. That creates redirect chains or loops.
-4. For `split`, `redirect_to` must be one of the `content_goes_to` rows.
+4. For `split`, `redirect_to` must be one of the content targets.
 5. If a target's disposition changes, flag every row pointing at it.
 
-Grid tools enforce rules poorly. Use saved filtered views as a "problems" list, and run the same checks in the app before any export.
+Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that shows up in the "problems" view. The same checks run again across the whole table before any export.
 
 ## Capabilities
 
 ### A. Crawl import
-- Stdlib `csv`. Expected columns include Address, Status Code, Indexability, Title, H1, Word Count, Crawl Depth, Inlinks. **Verify against a real export.**
+- Stdlib `csv`. Expected columns include Address, Status Code, Indexability, Title 1, H1-1, Word Count, Crawl Depth, Inlinks, plus optional traffic and near-duplicate columns. **Verify against a real export.**
 - Filter non-HTML, redirects, noindex, errors; normalize query strings and trailing slashes.
 - Initial tree position comes from URL path segments. URL hierarchy often differs from navigation on higher-ed sites, so treat it as a starting guess.
-- Re-importing a newer crawl should update rows by URL without losing decisions.
-- Optional extra columns: analytics or Search Console traffic, last-modified dates, near-duplicate flags.
-- Obvious cases (404s, redirects, clear sections) are handled by rules at import time, not AI.
+- Re-importing a newer crawl updates rows by URL without losing decisions. Pages missing from the new crawl are flagged, not deleted.
+- Rules at import time handle the obvious cases: 404s, redirects, and noindex pages get a default disposition of `review` with a reason.
+- Upload limits on the import form: size cap, CSV only, parsed in a background task so a big crawl doesn't block the app.
 
 ### B. Content cleanup in the grid
-- Bulk-assign dispositions, link combine and split targets, track status, add notes.
-- Saved views: by section, by disposition, problems list.
+- Bulk-assign dispositions and status from a selection action bar.
+- Link picker for `redirect_to` and content targets: type-ahead search on title and URL.
+- Saved views: by section, by disposition, problems list, near-duplicate clusters sorted by traffic and inlinks (the strongest page is the natural absorber).
 
 ### C. Visual tree editor
 - Designed levels only, with roll-up counts of pages beneath each node and "absorbs N pages" on combine targets.
@@ -151,56 +176,48 @@ Grid tools enforce rules poorly. Use saved filtered views as a "problems" list, 
 - Generator reads the tree from the database. Pages with `combine`, `split`, or `delete` aren't generated as separate nodes.
 - Depth cap so menus stop at the designed levels.
 - Page types first; free-form layout blocks and Octopus-style thumbnails only if types prove too limiting.
-- Prototype tab previews the generated files in an iframe, same pattern as `lab.home`.
+- Prototype tab previews the generated files in a sandboxed iframe.
 
 ### E. Exports
-- **Prototype zip** for manual S3 upload: `robots.txt` disallowing everything, `noindex` meta tags, filename with project and version (`clientname-sitemap-v3.zip`). No AWS credentials on the homelab.
+- **Prototype zip**, built in memory, for manual S3 upload: `robots.txt` disallowing everything, `noindex` meta tags, filename with project and version (`clientname-sitemap-v3.zip`). No AWS credentials on the homelab.
 - **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved.
-- **Content audit** as CSV or spreadsheet for the client.
+- **Content audit** as CSV or XLSX for the client. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
 - **Markdown sitemap**, for the existing CLI.
 
-### F. Tree testing (self-built)
+### F. Tree testing (self-built, isolated)
 - Labels-only tree, tasks with correct answers, path recording, success and directness metrics.
-- Participants are outside the LAN, so **only the test page and its results endpoint** are exposed, as a separate small service with its own proxy host. The main app stays LAN-only.
-- Treat it as untrusted public input: validate submissions, rate-limit, collect nothing but answers. This is the homelab's first internet-facing service, so it gets its own security review.
+- **Separate container with its own SQLite.** It never mounts the project files and holds no credentials for the main app.
+- The main app **publishes** a snapshot to it: labels and tasks only, no URLs, notes, or crawl data. Results are **pulled** back by the main app.
+- Two ports: public routes (test page, submit results) exposed through the Cloudflare Tunnel; admin routes (publish, fetch results) bound to the LAN only and never routed through the tunnel.
+- **Cloudflare Tunnel instead of a port forward:** an outbound-only connection, no open inbound port on the home network, and Cloudflare's rate limiting in front.
+- Treat submissions as untrusted: Pydantic schemas, request-size limits, per-IP rate limiting, unguessable test IDs, tests close after an end date. Collect nothing but answers and timings: no names, emails, or cookies.
+- Gets its own security review before going live.
 - Optional interim: export the tree in a format kardsort.com can import (**verify** the format).
-
-### G. AI classifier (local, batch, last)
-- Runs overnight as a queue against a local model. Speed doesn't matter; it's not interactive.
-- Jobs: page type, suggested disposition, near-duplicate clusters, suggested combine target (strongest page by inlinks or traffic as the absorber), suggested labels.
-- Writes only to the `ai_*` columns. Humans review in the grid (filter to AI-suggested, spot-check, bulk accept into the real columns).
-- Send only ambiguous pages.
-- Model lives behind one endpoint URL. The Beelink N100 handles small models slowly; a Strix Halo box, if bought for the rack, would run much larger ones.
-- Postponed to the end so the rest of the tool proves itself first, and so the hardware decision can be made with real data on how much classification is needed.
 
 ## Phases
 
 | Phase | Work | Done when |
 |---|---|---|
-| 0 | Dry run by hand: take a real crawl export into a spreadsheet, add disposition and target columns, work a section. Also: iframe-embed test of NocoDB on `lab.home` | The workflow feels right; we know whether iframes work |
-| 1 | Generator refactor: library, settings dict, ID-based links, zip output, consolidated parsing, naming. Postgres schema, crawl importer, NocoDB on VM 101 | A real crawl loads and bulk edits are responsive |
-| 2 | Dispositions, target links, validation views, redirect map and audit exports | A cleaned-up section exports a correct redirect map |
-| 3 | App shell: tabs, project picker, embedded NocoDB and prototype. Visual tree editor with roll-ups; prototype from the database; zip download | Pick a project, design top levels, download a working prototype, all from one screen |
+| 0 | Dry run by hand: take a real crawl export into a spreadsheet, add disposition and target columns, work a section. Grid spike: load the same crawl into SQLite and drive it from Tabulator with remote filter/sort | The workflow feels right; the grid stays responsive at real crawl size |
+| 1 | Tests, then generator refactor (library, settings dict, ID-based links, zip output, consolidated parsing, naming). SQLite schema and migrations, crawl importer, app skeleton with login, project list, read/edit Pages grid | A real crawl imports and inline edits in the grid are responsive |
+| 2 | Dispositions, link picker, validation on write, bulk edit, saved views and problems list, redirect map and audit exports | A cleaned-up section exports a correct redirect map |
+| 3 | Visual tree editor with roll-ups, prototype from the database, sandboxed preview, zip download | Pick a project, design top levels, download a working prototype, all from one screen |
 | 4 | Page types and layout wireframes | Prototype pages differ by type |
-| 5 | Self-hosted tree test with a public endpoint | A client participant completes a test from outside the LAN |
-| 6 | Local AI classifier: Ollama, batch queue, `ai_*` columns, review views in the grid | Overnight run on a crawl-sized table produces suggestions a person can bulk-accept |
+| 5 | Isolated tree-test service behind a Cloudflare Tunnel | A client participant completes a test from outside the LAN, and the results land back in the project |
 
 ## Open questions
 
-- Who uses it: just Noah, or the KWALL team and clients? This decides auth, permissions, and whether multi-user grid features are required.
 - Is the prototype internal-only or client-presentable?
 - Is the Octopus-style page-thumbnail look essential, or is a clean tree enough?
-- Postgres database per project, or schema per project within one database? (Depends partly on whether NocoDB can target a schema.)
 - Existing S3 bucket and CloudFront setup for client prototypes?
-- A sanitized Screaming Frog export to test against.
-- How the tree-test service is exposed: port forward, reverse tunnel, or similar. Decide at phase 5.
-- Which local model is good enough for page classification, and whether it fits on the Beelink or waits for bigger hardware. Decide at phase 6.
+- A sanitized Screaming Frog export to test against, ideally with near-duplicate and GA4/Search Console columns turned on.
+- A domain on Cloudflare for the tunnel (needed by phase 5).
+- When the coworker joins, do they need their own login only, or also per-project permissions?
 
 ## Risks
 
-- Grid tool performance at tens of thousands of rows.
-- Schema drift across per-project databases; the app needs a migration step that loops over all of them.
-- Iframe embedding may fight back (headers, cookies); fallback is a custom grid.
+- Building grid features NocoDB would have provided (link picker, saved views, bulk edit). Keep them minimal and driven by the real workflow from phase 0.
+- SQLite allows one writer at a time. Fine for one or two people; if the team grows to many simultaneous editors, move to Postgres (SQL kept portable for this).
 - URL structure may mislead on sites with legacy URLs.
-- Public tree-test endpoint is the first internet-facing homelab service.
-- Scope: this is now close to a content audit platform. Custom code should stay limited to the importer, the target model, the shell, the visual top levels, generation, exports, and the tree test.
+- The public tree-test endpoint is the first internet-facing homelab service. It's isolated by design but still needs its own review.
+- Scope: custom code should stay limited to the importer, the grid and its target model, the visual top levels, generation, exports, and the tree test.
