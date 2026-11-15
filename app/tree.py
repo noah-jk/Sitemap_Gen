@@ -169,14 +169,17 @@ def settings_row(conn) -> sqlite3.Row:
 
 
 def build_site(conn: sqlite3.Connection) -> Tuple[sp.Site, sp.Settings]:
+    from app import nav
     s = settings_row(conn)
     max_depth = s["max_depth"]
     root = sp.Node(title="Home")
+    pages: Dict[int, sp.Node] = {}
 
     def convert(node: TreeNode, parent: sp.Node, depth: int) -> None:
-        out = sp.Node(title=node.label, parent=parent, is_button=node.is_button, id=node.id,
-                      page_type=node.page_type, more_below=node.collection_count)
+        out = sp.Node(title=node.label, parent=parent, id=node.id, page_type=node.page_type,
+                      more_below=node.collection_count)
         parent.children.append(out)
+        pages[node.id] = out
         if max_depth and depth >= max_depth:
             out.more_below = node.descendants
             return
@@ -186,11 +189,38 @@ def build_site(conn: sqlite3.Connection) -> Tuple[sp.Site, sp.Settings]:
     for top in load(conn):
         convert(top, root, 1)
     sp.assign_paths(root)
-    footer, utility, standalone = sp.resolve_links(
-        sp.parse_footer(s["footer_md"]), sp.parse_utility_nav(s["utility_md"]), root)
+
+    def entries(items: List[dict], parent: sp.Node) -> List[sp.Node]:
+        """Menu entries for the generator. Entries whose page isn't built are skipped and
+        anything under them moves up, so the menu never links to a missing page."""
+        out: List[sp.Node] = []
+        for item in items:
+            target = pages.get(item["page_id"]) if item["page_id"] else None
+            if item["page_id"] and target is None:
+                out.extend(entries(item["children"], parent))
+                continue
+            entry = sp.Node(title=item["label"] or target.title, parent=parent,
+                            out_path=target.out_path if target else "", is_button=item["is_button"])
+            entry.children = entries(item["children"], entry)
+            out.append(entry)
+        return out
+
+    menus = nav.load(conn)
+    nav_root = sp.Node(title="")
+    nav_root.children = entries(menus["main"], nav_root)
+    if menus["utility"] or menus["footer"]:
+        holder = sp.Node(title="")
+        utility = [sp.LinkGroup(e.title, e if e.out_path else None, [c for c in e.children if c.out_path])
+                   for e in entries(menus["utility"], holder)]
+        footer = [sp.LinkGroup(e.title, None, [c for c in e.children if c.out_path])
+                  for e in entries(menus["footer"], holder)]
+        standalone: List[sp.Node] = []
+    else:  # projects set up before menus existed
+        footer, utility, standalone = sp.resolve_links(
+            sp.parse_footer(s["footer_md"]), sp.parse_utility_nav(s["utility_md"]), root)
     settings = sp.Settings(nav_style=s["nav_style"], dropdown_depth=s["dropdown_depth"],
                            mega_menu=bool(s["mega_menu"]), sticky_header=bool(s["sticky_header"]), noindex=True)
-    return sp.Site(root=root, footer=footer, utility=utility, standalone=standalone), settings
+    return sp.Site(root=root, footer=footer, utility=utility, standalone=standalone, nav_root=nav_root), settings
 
 
 def render_files(conn: sqlite3.Connection) -> Dict[str, str]:
@@ -200,5 +230,6 @@ def render_files(conn: sqlite3.Connection) -> Dict[str, str]:
 
 def stamp(conn: sqlite3.Connection) -> tuple:
     """Changes whenever anything that affects the prototype changes."""
+    from app import nav
     pages = tuple(conn.execute("SELECT count(*), max(updated_at), total(sort_order) FROM pages").fetchone())
-    return pages + tuple(settings_row(conn))
+    return pages + tuple(settings_row(conn)) + nav.stamp(conn)

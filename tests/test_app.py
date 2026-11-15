@@ -351,7 +351,8 @@ def test_prototype_preview_settings_and_zip(imported, tmp_path):
     assert 'sandbox="allow-scripts"' in html
     with TestClient(imported.app) as anonymous:  # the preview needs no login, only the signed link
         r = anonymous.get(preview)
-        assert r.status_code == 200 and "Admissions" in r.text
+        assert r.status_code == 200
+        assert anonymous.get(preview.replace("index.html", "admissions/index.html")).status_code == 200
         assert r.headers["content-security-policy"].startswith("sandbox allow-scripts")
         assert r.headers["x-frame-options"] == "SAMEORIGIN"
         css = anonymous.get(preview.replace("index.html", "style.css"))
