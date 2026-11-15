@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Publish on the LAN address only, never 0.0.0.0. Set LAN_IP in a .env file next to this one.
+      - "${LAN_IP:?set LAN_IP in .env}:8080:8000"
+    environment:
+      # Nginx Proxy Manager's address, so the app trusts its X-Forwarded-For header.
+      FORWARDED_ALLOW_IPS: "${PROXY_IP:?set PROXY_IP in .env}"
+    volumes:
+      - ./data:/data

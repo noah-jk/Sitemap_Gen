@@ -163,6 +163,41 @@ files = sp.render_site(site, sp.Settings(mega_menu=True))  # {"index.html": "...
 sp.write_dir(files, "prototype")                           # or: zip_bytes = sp.write_zip(files)
 ```
 
+## Web app (content audit)
+
+`app/` is a self-hosted web app for working a Screaming Frog crawl into a
+content audit: import the crawl, then filter, sort, and set KWALL Reco / Final
+Decision / notes in a grid. Each client project is its own SQLite file under
+the data folder.
+
+Run locally:
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+export SITEMAP_DATA_DIR=./data SITEMAP_INSECURE_COOKIES=1   # plain http on localhost only
+.venv/bin/python -m app.manage create-user noah
+.venv/bin/uvicorn app.main:create_app --factory --port 8000
+```
+
+Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS:
+
+```sh
+printf 'LAN_IP=192.168.1.50\nPROXY_IP=192.168.1.10\n' > .env   # your addresses
+docker compose up -d --build
+docker compose exec app python -m app.manage create-user noah
+```
+
+Admin commands (`python -m app.manage ...`): `create-user NAME`, `migrate`,
+and `backup DEST_DIR`, which writes consistent copies of every database and
+is safe while the app is running. Run the backup nightly from cron, e.g.
+`docker compose exec -T app python -m app.manage backup /data/backups`.
+
+Import the **"Internal: All"** export as CSV. The importer keeps HTML pages only,
+merges `www`/bare-host/`http`/trailing-slash variants into one page, sums GA4
+traffic across hosts, records existing redirects, and lists problems on the
+live site (malformed links, the whole site answering on two hosts) under
+"Site issues" on the Import tab.
+
 ## Tests
 
 ```sh
