@@ -41,7 +41,7 @@ h3 { font-size: 14px; margin: 16px 0 8px; }
 label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 13px; }
 input { font: inherit; font-weight: 400; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--card); color: var(--ink); min-width: 0; }
-button.primary { font: inherit; font-weight: 600; padding: 8px 16px; border: 0; border-radius: 6px;
+button.primary, a.button.primary { display: inline-block; text-decoration: none; font: inherit; font-weight: 600; padding: 8px 16px; border: 0; border-radius: 6px;
   background: var(--accent); color: var(--accent-ink); cursor: pointer; }
 .error { color: var(--error); font-weight: 600; }
 .muted { color: var(--muted); }

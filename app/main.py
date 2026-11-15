@@ -1,4 +1,4 @@
-"""Web app: login, projects, crawl import, and the Pages grid.
+"""Web app: login, projects, crawl import, the Pages grid, and exports.
 
 Run with: uvicorn app.main:create_app --factory
 """
@@ -7,31 +7,24 @@ import hmac
 import io
 import json
 import os
-import re
 import secrets
 from contextlib import closing
-from typing import Optional
+from datetime import date
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, config, importer
+from app import auth, config, exports, grid, importer, rules
 from app.db import DISPOSITIONS, SLUG_RE, Store, now_ms
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 PAGE_SIZE_MAX = 500
-
-GRID_COLUMNS = ["id", "label", "url_path", "status_code", "sessions", "views", "inlinks", "in_current_nav",
-                "collection", "recommendation", "decision", "status", "notes", "missing_from_crawl", "updated_at"]
-TEXT_FILTERS = {"label", "url_path", "notes", "collection"}
-EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl"}
-EDITABLE = {"recommendation": DISPOSITIONS, "decision": DISPOSITIONS, "status": ("todo", "done"), "notes": None}
-MAX_NOTES = 5000
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -46,9 +39,19 @@ class FormExpired(Exception):
 
 
 class Edit(BaseModel):
-    field: str
-    value: Optional[str]
+    changes: Dict[str, Any]
     updated_at: int
+
+
+class Bulk(BaseModel):
+    changes: Dict[str, Any]
+    ids: Optional[List[int]] = None
+    match: Optional[Dict[str, Any]] = None
+
+
+class ViewIn(BaseModel):
+    name: str
+    definition: Dict[str, Any]
 
 
 def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None) -> FastAPI:
@@ -228,7 +231,54 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             text.detach()
         return RedirectResponse(f"/p/{slug}/import", status_code=303)
 
+    # ---- exports -----------------------------------------------------------
+
+    def download(content: str, slug: str, name: str, media_type: str) -> Response:
+        stem, ext = name.rsplit(".", 1)
+        filename = f"{slug}-{stem}-{date.today().isoformat()}.{ext}"
+        return Response(content.encode("utf-8"), media_type=f"{media_type}; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    @app.get("/p/{slug}/exports", response_class=HTMLResponse)
+    def exports_view(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            rmap = exports.redirect_map(conn)
+            counts = conn.execute(
+                "SELECT count(*) AS pages, sum(decision IS NOT NULL) AS decided, "
+                "sum(recommendation IS NOT NULL) AS recommended FROM pages").fetchone()
+        return render(request, "exports.html", slug=slug, project=project_name(slug), tab="exports",
+                      rmap=rmap, counts=counts)
+
+    @app.get("/p/{slug}/exports/redirect-map.csv")
+    def export_redirects(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            rmap = exports.redirect_map(conn)
+        if not rmap.ok:
+            return RedirectResponse(f"/p/{slug}/exports", status_code=303)
+        return download(rmap.csv(), slug, "redirect-map.csv", "text/csv")
+
+    @app.get("/p/{slug}/exports/content-audit.csv")
+    def export_audit(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            content = exports.content_audit_csv(conn)
+        return download(content, slug, "content-audit.csv", "text/csv")
+
+    @app.get("/p/{slug}/exports/sitemap.md")
+    def export_markdown(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            content = exports.markdown_sitemap(conn, project_name(slug), date.today().isoformat())
+        return download(content, slug, "sitemap.md", "text/markdown")
+
     # ---- pages grid --------------------------------------------------------
+
+    def row_dict(row) -> dict:
+        d = dict(row)
+        d["content_targets"] = json.loads(d["content_targets"] or "[]")
+        return d
 
     @app.get("/p/{slug}/pages", response_class=HTMLResponse)
     def pages_view(request: Request, slug: str):
@@ -239,67 +289,96 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                       count=count, dispositions=DISPOSITIONS)
 
     @app.get("/api/p/{slug}/pages")
-    def pages_api(request: Request, slug: str, page: int = 1, size: int = 100):
+    def pages_api(request: Request, slug: str, page: int = 1, size: int = 100, view: str = ""):
         require_user(request)
         size = max(1, min(size, PAGE_SIZE_MAX))
-        page = max(1, page)
-        where, args = [], []
-        for f in _bracket_params(request, "filter"):
-            field, value = f.get("field"), f.get("value", "")
-            if field in TEXT_FILTERS:
-                where.append(f"{field} LIKE ? ESCAPE '\\'")
-                args.append("%" + re.sub(r"([%_\\])", r"\\\1", value) + "%")
-            elif field in EXACT_FILTERS:
-                if value == "(blank)":
-                    where.append(f"{field} IS NULL")
-                else:
-                    where.append(f"{field} = ?")
-                    args.append(value)
-        order = [f"{s['field']} {'DESC' if s.get('dir') == 'desc' else 'ASC'}"
-                 for s in _bracket_params(request, "sort") if s.get("field") in GRID_COLUMNS]
-        sql_where = f"WHERE {' AND '.join(where)}" if where else ""
+        items = request.query_params.multi_items()
         with closing(open_project(slug)) as conn:
-            total = conn.execute(f"SELECT count(*) FROM pages {sql_where}", args).fetchone()[0]
-            rows = conn.execute(
-                f"SELECT {','.join(GRID_COLUMNS)} FROM pages {sql_where} "
-                f"ORDER BY {', '.join(order + ['id'])} LIMIT ? OFFSET ?",
-                args + [size, (page - 1) * size]).fetchall()
-        return {"last_page": max(1, -(-total // size)), "last_row": total, "data": [dict(r) for r in rows]}
+            total, rows = grid.page_rows(conn, grid.bracket_params(items, "filter"),
+                                         grid.bracket_params(items, "sort"), view, max(1, page), size)
+            problem_count = len(rules.problems(conn))
+        return {"last_page": max(1, -(-total // size)), "last_row": total, "problem_count": problem_count,
+                "data": [row_dict(r) for r in rows]}
 
     @app.patch("/api/p/{slug}/pages/{page_id}")
     def edit_page(request: Request, slug: str, page_id: int, edit: Edit):
         require_user(request)
         check_csrf(request, request.headers.get("X-CSRF-Token"))
-        if edit.field not in EDITABLE:
-            raise HTTPException(400, "that column can't be edited")
-        allowed = EDITABLE[edit.field]
-        if allowed is None:
-            value = (edit.value or "")[:MAX_NOTES]
-        else:
-            value = edit.value or None
-            if value is None and edit.field == "status":
-                value = "todo"
-            if value is not None and value not in allowed:
-                raise HTTPException(400, f"{edit.field} must be one of: {', '.join(allowed)}")
         with closing(open_project(slug)) as conn:
-            cur = conn.execute(
-                f"UPDATE pages SET {edit.field} = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
-                (value, now_ms(), page_id, edit.updated_at))
-            row = conn.execute(f"SELECT {','.join(GRID_COLUMNS)} FROM pages WHERE id = ?", (page_id,)).fetchone()
-        if row is None:
-            raise HTTPException(404, "no such page")
-        if cur.rowcount == 0:
-            return JSONResponse({"detail": "changed by someone else", "row": dict(row)}, status_code=409)
-        return dict(row)
+            try:
+                _, warning = rules.apply_changes(conn, page_id, edit.changes, edit.updated_at)
+            except KeyError:
+                raise HTTPException(404, "That page no longer exists.")
+            except rules.Conflict:
+                return JSONResponse({"detail": "Someone else changed this row first. It now shows their version.",
+                                     "row": row_dict(grid.one_row(conn, page_id))}, status_code=409)
+            except rules.RuleError as e:
+                return JSONResponse({"detail": str(e), "row": row_dict(grid.one_row(conn, page_id))},
+                                    status_code=400)
+            return {"row": row_dict(grid.one_row(conn, page_id)), "warning": warning}
+
+    @app.post("/api/p/{slug}/pages/bulk")
+    def bulk_edit(request: Request, slug: str, bulk: Bulk):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        with closing(open_project(slug)) as conn:
+            if bulk.match is not None:
+                filters = [f for f in bulk.match.get("filters", []) if isinstance(f, dict)]
+                ids = grid.matching_ids(conn, filters, bulk.match.get("view"))
+            else:
+                ids = bulk.ids or []
+            try:
+                count, warning = rules.bulk_apply(conn, ids, bulk.changes)
+            except rules.RuleError as e:
+                return JSONResponse({"detail": str(e)}, status_code=400)
+        return {"count": count, "warning": warning}
+
+    @app.get("/api/p/{slug}/targets")
+    def targets(request: Request, slug: str, q: str = "", exclude: Optional[int] = None):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            rows = grid.search_targets(conn, q[:200], exclude)
+        return [dict(r) for r in rows]
+
+    @app.get("/api/p/{slug}/views")
+    def list_views(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            saved = [{"id": r["id"], "name": r["name"], "definition": json.loads(r["definition"])}
+                     for r in conn.execute("SELECT id, name, definition FROM views ORDER BY name")]
+        return {"presets": [{"key": k, "title": t} for k, (t, _) in grid.PRESETS.items()], "saved": saved}
+
+    @app.post("/api/p/{slug}/views")
+    def save_view(request: Request, slug: str, view: ViewIn):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        name = view.name.strip()[:100]
+        if not name:
+            return JSONResponse({"detail": "Give the view a name."}, status_code=400)
+        definition = clean_view(view.definition)
+        with closing(open_project(slug)) as conn:
+            conn.execute("INSERT INTO views(name, definition) VALUES (?, ?) ON CONFLICT(name) "
+                         "DO UPDATE SET definition = excluded.definition", (name, json.dumps(definition)))
+            view_id = conn.execute("SELECT id FROM views WHERE name = ?", (name,)).fetchone()[0]
+        return {"id": view_id, "name": name, "definition": definition}
+
+    @app.delete("/api/p/{slug}/views/{view_id}")
+    def delete_view(request: Request, slug: str, view_id: int):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        with closing(open_project(slug)) as conn:
+            conn.execute("DELETE FROM views WHERE id = ?", (view_id,))
+        return {"ok": True}
 
     return app
 
 
-def _bracket_params(request: Request, name: str) -> list:
-    """Collect Tabulator's filter[0][field]=... style query parameters."""
-    found = {}
-    for key, value in request.query_params.multi_items():
-        m = re.fullmatch(rf"{name}\[(\d{{1,3}})\]\[(field|type|value|dir)\]", key)
-        if m:
-            found.setdefault(int(m[1]), {})[m[2]] = value
-    return [found[i] for i in sorted(found)]
+def clean_view(definition: dict) -> dict:
+    """Keep only known fields so a saved view can never carry anything else into a query."""
+    filters = [{"field": f["field"], "value": str(f.get("value", ""))[:200]}
+               for f in definition.get("filters", []) if isinstance(f, dict)
+               and f.get("field") in grid.TEXT_FILTERS | grid.EXACT_FILTERS][:20]
+    sorts = [{"column": s["column"], "dir": "desc" if s.get("dir") == "desc" else "asc"}
+             for s in definition.get("sorts", []) if isinstance(s, dict) and s.get("column") in grid.FIELDS][:5]
+    view = definition.get("view") if definition.get("view") in grid.PRESETS else ""
+    return {"view": view, "filters": filters, "sorts": sorts}

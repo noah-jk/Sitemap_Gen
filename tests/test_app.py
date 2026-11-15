@@ -162,21 +162,114 @@ def test_grid_ignores_unknown_sort_and_filter_fields(imported):
     assert r.json()["last_row"] == 0
 
 
+def page_by_path(client, path):
+    rows = client.get("/api/p/example/pages", params={"size": 500}).json()["data"]
+    return next(r for r in rows if r["url_path"] == path)
+
+
+def patcher(client, token):
+    def patch(row, tok=None, **changes):
+        return client.patch(f"/api/p/example/pages/{row['id']}",
+                            json={"changes": changes, "updated_at": row["updated_at"]},
+                            headers={"X-CSRF-Token": tok or token})
+    return patch
+
+
 def test_edit_saves_and_detects_conflicts(imported):
-    token = grid_csrf(imported)
-    row = imported.get("/api/p/example/pages", params={"size": 1}).json()["data"][0]
-    patch = lambda field, value, ts, tok=token: imported.patch(
-        f"/api/p/example/pages/{row['id']}", json={"field": field, "value": value, "updated_at": ts},
-        headers={"X-CSRF-Token": tok})
-    r = patch("decision", "keep", row["updated_at"])
-    assert r.status_code == 200 and r.json()["decision"] == "keep"
-    stale = patch("decision", "delete", row["updated_at"])
+    patch = patcher(imported, grid_csrf(imported))
+    row = page_by_path(imported, "/admissions/contact")
+    r = patch(row, decision="keep")
+    assert r.status_code == 200 and r.json()["row"]["decision"] == "keep"
+    stale = patch(row, decision="delete")
     assert stale.status_code == 409 and stale.json()["row"]["decision"] == "keep"
-    assert patch("decision", "merge", r.json()["updated_at"]).status_code == 400
-    assert patch("label", "renamed", r.json()["updated_at"]).status_code == 400
-    assert patch("notes", "x", r.json()["updated_at"], tok="forged").status_code == 403
-    cleared = patch("decision", None, r.json()["updated_at"])
-    assert cleared.status_code == 200 and cleared.json()["decision"] is None
+    fresh = r.json()["row"]
+    assert patch(fresh, decision="merge").status_code == 400
+    assert patch(fresh, label="renamed").status_code == 400
+    assert patch(fresh, tok="forged", notes="x").status_code == 403
+    cleared = patch(fresh, decision=None)
+    assert cleared.status_code == 200 and cleared.json()["row"]["decision"] is None
+
+
+def test_combine_needs_target_and_saves_with_one(imported):
+    patch = patcher(imported, grid_csrf(imported))
+    row = page_by_path(imported, "/admissions/contact")
+    target = page_by_path(imported, "/about/contact")
+    r = patch(row, decision="combine")
+    assert r.status_code == 400 and "Needs a page to redirect to" in r.json()["detail"]
+    r = patch(row, decision="combine", redirect_to=target["id"])
+    assert r.status_code == 200
+    assert r.json()["row"]["redirect_label"] == "Contact Us" and r.json()["row"]["redirect_path"] == "/about/contact"
+    r = patch(target, decision="delete")
+    assert r.status_code == 200 and "1 other page points here" in r.json()["warning"]
+    problems = imported.get("/api/p/example/pages", params={"view": "problems"}).json()
+    assert [p["url_path"] for p in problems["data"]] == ["/admissions/contact"]
+    assert problems["problem_count"] == 1
+
+
+def test_target_search_skips_removed_and_error_pages(imported):
+    patch = patcher(imported, grid_csrf(imported))
+    patch(page_by_path(imported, "/about/contact"), decision="delete")
+    found = imported.get("/api/p/example/targets", params={"q": "contact"}).json()
+    assert [f["url_path"] for f in found] == ["/admissions/contact"]
+    found = imported.get("/api/p/example/targets", params={"q": "gone"}).json()
+    assert found == []
+    me = page_by_path(imported, "/admissions")
+    found = imported.get("/api/p/example/targets", params={"q": "admissions", "exclude": me["id"]}).json()
+    assert me["id"] not in [f["id"] for f in found]
+
+
+def test_bulk_edit_selected_and_matching(imported):
+    token = grid_csrf(imported)
+    post = lambda body, tok=token: imported.post("/api/p/example/pages/bulk", json=body,
+                                                 headers={"X-CSRF-Token": tok})
+    news = [page_by_path(imported, p)["id"] for p in ("/news/2024/story-one", "/news/story-two")]
+    r = post({"ids": news, "changes": {"recommendation": "delete"}})
+    assert r.json()["count"] == 2
+    r = post({"match": {"filters": [{"field": "collection", "value": "news"}]}, "changes": {"decision": "keep"}})
+    assert r.json()["count"] == 2
+    target = page_by_path(imported, "/news")["id"]
+    r = post({"match": {"filters": [{"field": "url_path", "value": "/news"}]},
+              "changes": {"decision": "combine", "redirect_to": target}})
+    assert r.status_code == 400 and "in the selection" in r.json()["detail"]
+    assert post({"ids": news, "changes": {"decision": "keep"}}, tok="forged").status_code == 403
+    assert post({"ids": news, "changes": {"notes": "x"}}).status_code == 400
+
+
+def test_presets_and_saved_views(imported):
+    token = grid_csrf(imported)
+    gone = imported.get("/api/p/example/pages", params={"view": "gone_visited"}).json()
+    assert sorted(r["url_path"] for r in gone["data"]) == ["/old-page", "/restricted"]
+    nav = imported.get("/api/p/example/pages", params={"view": "current_nav"}).json()
+    assert nav["last_row"] == 3
+    body = {"name": "Admissions", "definition": {
+        "view": "no_traffic", "filters": [{"field": "url_path", "value": "/admissions"}, {"field": "evil", "value": "x"}],
+        "sorts": [{"column": "sessions", "dir": "desc"}, {"column": "x; drop", "dir": "asc"}]}}
+    saved = imported.post("/api/p/example/views", json=body, headers={"X-CSRF-Token": token}).json()
+    assert saved["definition"] == {"view": "no_traffic", "filters": [{"field": "url_path", "value": "/admissions"}],
+                                   "sorts": [{"column": "sessions", "dir": "desc"}]}
+    listed = imported.get("/api/p/example/views").json()
+    assert [v["name"] for v in listed["saved"]] == ["Admissions"]
+    assert "problems" in [p["key"] for p in listed["presets"]]
+    imported.delete(f"/api/p/example/views/{saved['id']}", headers={"X-CSRF-Token": token})
+    assert imported.get("/api/p/example/views").json()["saved"] == []
+
+
+def test_exports_page_and_downloads(imported):
+    patch = patcher(imported, grid_csrf(imported))
+    target = page_by_path(imported, "/about/contact")
+    patch(page_by_path(imported, "/admissions/contact"), decision="combine", redirect_to=target["id"])
+    html = imported.get("/p/example/exports").text
+    assert "Download redirect map" in html
+    r = imported.get("/p/example/exports/redirect-map.csv")
+    assert r.headers["content-disposition"].startswith('attachment; filename="example-redirect-map-')
+    assert "https://www.example.edu/admissions/contact" in r.text
+    assert imported.get("/p/example/exports/content-audit.csv").text.startswith("\ufeffAddress,Recommendation")
+    assert "- Contact Us" in imported.get("/p/example/exports/sitemap.md").text
+    patch(page_by_path(imported, "/about/contact"), decision="delete")
+    html = imported.get("/p/example/exports").text
+    assert "can't be exported yet" in html
+    r = imported.get("/p/example/exports/redirect-map.csv", follow_redirects=False)
+    assert r.status_code == 303
 
 
 def test_password_change_logs_out_old_sessions(logged_in, tmp_path):
