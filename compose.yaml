@@ -3,10 +3,14 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      # Publish on the LAN address only, never 0.0.0.0. Set LAN_IP in a .env file next to this one.
-      - "${LAN_IP:?set LAN_IP in .env}:8080:8000"
+      # Publish on the LAN address only, never 0.0.0.0. Set LAN_IP in .env or in Portainer's stack variables.
+      - "${LAN_IP:?set LAN_IP}:8080:8000"
     environment:
       # Nginx Proxy Manager's address, so the app trusts its X-Forwarded-For header.
-      FORWARDED_ALLOW_IPS: "${PROXY_IP:?set PROXY_IP in .env}"
+      FORWARDED_ALLOW_IPS: "${PROXY_IP:?set PROXY_IP}"
     volumes:
-      - ./data:/data
+      # Named volume: Docker copies the image's /data ownership, so the non-root app user can write.
+      - sitemap_data:/data
+
+volumes:
+  sitemap_data:

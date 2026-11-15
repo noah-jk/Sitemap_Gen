@@ -179,18 +179,27 @@ export SITEMAP_DATA_DIR=./data SITEMAP_INSECURE_COOKIES=1   # plain http on loca
 .venv/bin/uvicorn app.main:create_app --factory --port 8000
 ```
 
-Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS:
+Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS. The
+compose file needs two variables: `LAN_IP` (the server's LAN address; the app
+listens only there) and `PROXY_IP` (the address Nginx Proxy Manager connects
+from, as shown in the app's request log).
 
-```sh
-printf 'LAN_IP=192.168.1.50\nPROXY_IP=192.168.1.10\n' > .env   # your addresses
-docker compose up -d --build
-docker compose exec app python -m app.manage create-user noah
-```
+- **Portainer:** Stacks → Add stack → Repository, point it at this repo and
+  `compose.yaml`, and set `LAN_IP` and `PROXY_IP` under Environment variables.
+  Create the first login from the container's Console:
+  `python -m app.manage create-user noah`.
+- **Command line:** put the two variables in a `.env` file next to
+  `compose.yaml`, then `docker compose up -d --build` and
+  `docker compose exec app python -m app.manage create-user noah`.
+
+The proxy host must use HTTPS: the login cookie is HTTPS-only. Data lives in
+the `sitemap_data` volume.
 
 Admin commands (`python -m app.manage ...`): `create-user NAME`, `migrate`,
 and `backup DEST_DIR`, which writes consistent copies of every database and
-is safe while the app is running. Run the backup nightly from cron, e.g.
-`docker compose exec -T app python -m app.manage backup /data/backups`.
+is safe while the app is running. Run the backup nightly from the host's cron,
+e.g. `docker exec <container> python -m app.manage backup /data/backups`, and
+copy `/data/backups` off the volume as part of your normal backups.
 
 Import the **"Internal: All"** export as CSV. The importer keeps HTML pages only,
 merges `www`/bare-host/`http`/trailing-slash variants into one page, sums GA4
