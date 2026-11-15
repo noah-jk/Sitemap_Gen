@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Navigation · {{ project }}{% endblock %}
+{% block body_attrs %} data-slug="{{ slug }}" data-csrf="{{ csrf }}"{% endblock %}
+{% block main_class %}content wide{% endblock %}
+{% block content %}
+<h1>Navigation</h1>
+<p class="muted small">Menus are separate from the sitemap. They start empty and you add what belongs in them; pages
+  that aren't in any menu still exist (landing pages, for example). Drag the ⠿ handle to reorder, nest, or move an entry
+  to another menu, or use ↑ ↓. <strong>Rename</strong> gives an entry a shorter label without changing the page.</p>
+<p id="nav-status" role="status" aria-live="polite" class="muted small"></p>
+<div class="menus">
+  {% for key, name, levels in menus %}
+  <section class="card menu-panel" data-menu="{{ key }}">
+    <div class="menu-head">
+      <h2>{{ name }}</h2>
+      <span class="muted small">up to {{ levels }} levels{% if key == "footer" %}, 4 columns (headings) with links{% endif %}</span>
+    </div>
+    <div class="toolbar">
+      <button type="button" data-add-pages="{{ key }}">Add pages…</button>
+      <button type="button" data-add-heading="{{ key }}">Add heading</button>
+    </div>
+    <ul class="tree-list nav-list" data-menu="{{ key }}" data-parent=""></ul>
+  </section>
+  {% endfor %}
+</div>
+
+<dialog id="add-dialog" aria-labelledby="add-title">
+  <form id="add-form">
+    <h2 id="add-title"></h2>
+    <input type="search" id="add-search" placeholder="Search pages by name or path" autocomplete="off"
+           aria-label="Search for pages to add">
+    <ul id="add-results" class="results"></ul>
+    <p class="muted small" id="add-count">Nothing chosen yet.</p>
+    <label>Include sub-pages
+      <select id="add-depth">
+        <option value="0">No, just these pages</option>
+        <option value="1">Yes, 1 level down</option>
+        <option value="2">Yes, 2 levels down</option>
+        <option value="3">Yes, 3 levels down</option>
+      </select>
+      <span class="muted small">Copies each page's children from the Sitemap tab, in the same order. Removed,
+        gone, and news or calendar pages are skipped, and nothing goes deeper than the menu allows.</span>
+    </label>
+    <p class="error" id="add-error" role="alert"></p>
+    <div class="row end">
+      <button type="button" id="add-cancel">Cancel</button>
+      <button type="submit" class="primary" id="add-save">Add</button>
+    </div>
+  </form>
+</dialog>
+<script src="/static/vendor/Sortable.min.js"></script>
+<script src="/static/nav.js"></script>
+{% endblock %}

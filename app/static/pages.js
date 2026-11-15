@@ -143,7 +143,7 @@
     ajaxResponse(url, params, resp) {
       lastTotal = resp.last_row;
       const plural = resp.last_row === 1 ? "page" : "pages";
-      status.textContent = `${resp.last_row.toLocaleString()} ${plural}`;
+      $("grid-count").textContent = `${resp.last_row.toLocaleString()} ${plural}`;
       $("bulk-total").textContent = resp.last_row.toLocaleString();
       $("bulk-noun").textContent = plural;
       const badge = $("problem-badge");
@@ -161,9 +161,11 @@
       {title: "Sessions", field: "sessions", width: 96, hozAlign: "right", formatter: "money",
        formatterParams: {precision: 0, thousand: ","}, headerSortStartingDir: "desc"},
       {title: "Inlinks", field: "inlinks", width: 84, hozAlign: "right", headerSortStartingDir: "desc"},
-      {title: "In nav", field: "in_current_nav", width: 72, hozAlign: "center", formatter: "tickCross",
+      {title: "In current nav", field: "in_current_nav", width: 82, hozAlign: "center", formatter: "tickCross",
        formatterParams: {crossElement: false}},
       {title: "Collection", field: "collection", width: 104, formatter: "plaintext", headerFilter: "input"},
+      {title: "Parent", field: "parent_label", formatter: "plaintext", headerFilter: "input", minWidth: 140},
+      {title: "Menus", field: "menus", formatter: "plaintext", headerFilter: "input", width: 110},
       disposition("Recommendation", "recommendation"),
       disposition("Final Decision", "decision"),
       {title: "Redirect to", field: "redirect_label", formatter: redirectFormatter, headerFilter: "input",
@@ -285,7 +287,7 @@
     if (opts.mode === "bulk") {
       dlg = Object.assign({redirect: null, content: []}, opts);
       $("td-title").textContent = opts.title;
-      $("td-path").textContent = "Pick the page they all redirect to.";
+      $("td-path").textContent = opts.hint || "Pick the page they all redirect to.";
       $("td-dispositions").hidden = true;
     } else {
       const data = opts.row.getData();
@@ -353,9 +355,12 @@
   const bulkValue = $("bulk-value");
   function fillBulkValues() {
     const field = $("bulk-field").value;
-    const values = field === "status" ? ["todo", "done"] : ["", "keep", "delete", "review", "combine"];
-    bulkValue.replaceChildren(...values.map((v) => el("option", {value: v,
-      text: v === "" ? "(clear)" : v === "combine" ? "combine into…" : v})));
+    const values = field === "status" ? ["todo", "done"]
+      : field === "parent_id" ? ["pick", "top"] : field === "menu" ? ["add"]
+      : ["", "keep", "delete", "review", "combine"];
+    const names = {"": "(clear)", combine: "combine into…", pick: "a page I choose…", top: "the top level",
+      add: "a menu I choose…"};
+    bulkValue.replaceChildren(...values.map((v) => el("option", {value: v, text: names[v] || v})));
   }
   $("bulk-field").addEventListener("change", fillBulkValues);
   fillBulkValues();
@@ -381,6 +386,28 @@
       table.setPage(table.getPage());
     };
 
+    const pages = `${count.toLocaleString()} page${count === 1 ? "" : "s"}`;
+    if (field === "menu") {
+      MenuPicker.open({api, csrf, title: `Add ${pages} to a menu`, target,
+        onDone: (added, menuName) => {
+          table.deselectRow();
+          $("bulk-all").checked = false;
+          status.textContent = `Added ${added} entr${added === 1 ? "y" : "ies"} to the ${menuName}.`;
+          table.setPage(table.getPage());
+        }});
+      return;
+    }
+    if (field === "parent_id" && value === "pick") {
+      openDialog({mode: "bulk", title: `Move ${pages} under…`,
+        hint: "Pick the page they should sit under in the new navigation. Their sub-pages move with them.",
+        onSave: (parentId) => run({parent_id: parentId})});
+      return;
+    }
+    if (field === "parent_id") {
+      if (count > 25 && !window.confirm(`Move ${pages} to the top level?`)) return;
+      run({parent_id: null});
+      return;
+    }
     if (value === "combine") {
       openDialog({mode: "bulk", title: `Combine ${count.toLocaleString()} page${count === 1 ? "" : "s"} into…`,
         onSave: (redirectTo) => run({[field]: "combine", redirect_to: redirectTo})});

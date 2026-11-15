@@ -31,7 +31,7 @@ import argparse
 import functools
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 
 # --------------------------------------------------------------------------
@@ -47,6 +47,7 @@ class Node:
     is_button: bool = False  # render as a button in the global nav
     id: Optional[int] = None  # stable identity when the tree comes from a database
     page_type: str = ""
+    more_below: int = 0   # pages under this one left out of the prototype (collections, depth cap)
 
 @dataclass
 class FooterColumn:
@@ -72,6 +73,7 @@ class Settings:
     dropdown_depth: int = 0
     mega_menu: bool = False
     sticky_header: bool = False
+    noindex: bool = False  # robots meta on every page, for prototypes hosted publicly
 
     def __post_init__(self) -> None:
         if self.nav_style not in ("grid", "sidebar"):
@@ -87,6 +89,9 @@ class Site:
     footer: List[LinkGroup] = field(default_factory=list)
     utility: List[LinkGroup] = field(default_factory=list)
     standalone: List[Node] = field(default_factory=list)  # footer/utility-only pages, not in the nav tree
+    # Main menu, when it isn't simply the sitemap's top levels. Its nodes are menu entries: their
+    # out_path points at a page in the sitemap ("" for a label-only heading) and their title is the label.
+    nav_root: Optional[Node] = None
 
 
 def _tree_to_dict(node: Node) -> Dict[str, object]:
@@ -284,7 +289,7 @@ def nav_dropdown(children: List[Node], here: str, remaining_levels: int) -> str:
     """Recursively build <li> items for a dropdown or flyout panel."""
     items = []
     for c in children:
-        link = f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+        link = f'<a{_href_attr(here, c)}>{esc(c.title)}</a>'
         if remaining_levels > 1 and c.children:
             sub = nav_dropdown(c.children, here, remaining_levels - 1)
             items.append(f'<li class="has-flyout">{link}<ul class="flyout">{sub}</ul></li>')
@@ -296,10 +301,10 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
     """Build the column-based mega-menu panel for one top-level nav item."""
     cols = []
     for col_node in top_node.children:
-        head = f'<a class="mega-col-head" href="{esc(rel(here, col_node.out_path))}">{esc(col_node.title)}</a>'
+        head = f'<a class="mega-col-head"{_href_attr(here, col_node)}>{esc(col_node.title)}</a>'
         if col_node.children:
             links = "".join(
-                f'<li><a href="{esc(rel(here, lc.out_path))}">{esc(lc.title)}</a></li>'
+                f'<li><a{_href_attr(here, lc)}>{esc(lc.title)}</a></li>'
                 for lc in col_node.children
             )
             cols.append(f'<div class="mega-col">{head}<ul>{links}</ul></div>')
@@ -309,6 +314,10 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
 
 def _href(here: str, node: Optional[Node]) -> str:
     return esc(rel(here, node.out_path) if node is not None else "#")
+
+def _href_attr(here: str, node: Node) -> str:
+    """ href="..." for a page or menu entry; nothing for a label-only menu heading."""
+    return f' href="{esc(rel(here, node.out_path))}"' if node.out_path else ""
 
 def _build_utility_nav_html(utility: Sequence[LinkGroup], here: str) -> str:
     if not utility:
@@ -348,20 +357,20 @@ def _build_footer_inner(footer: Sequence[LinkGroup], here: str) -> str:
     return f'<div class="footer-path"><code>{esc(here)}</code>{sitemap_link}</div>'
 
 def _build_mobile_nav(
-    root: Node,
+    nav: Node,
     here: str,
-    section_of_node: Optional[Node],
+    active_paths: Set[str],
     utility: Sequence[LinkGroup] = (),
 ) -> str:
     mob_parts = []
-    for c in root.children:
-        cls = _nav_classes(c, section_of_node)
+    for c in nav.children:
+        cls = _nav_classes(c, active_paths)
         link_cls = f' class="{cls}"' if cls else ""
-        link = f'<a{link_cls} href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+        link = f'<a{link_cls}{_href_attr(here, c)}>{esc(c.title)}</a>'
         if c.children:
-            open_attr = " open" if c is section_of_node else ""
+            open_attr = " open" if c.out_path in active_paths else ""
             children_html = "".join(
-                f'<div class="mob-child"><a href="{esc(rel(here, gc.out_path))}">{esc(gc.title)}</a></div>'
+                f'<div class="mob-child"><a{_href_attr(here, gc)}>{esc(gc.title)}</a></div>'
                 for gc in c.children
             )
             mob_parts.append(f'<details{open_attr}><summary>{link}</summary>{children_html}</details>')
@@ -385,12 +394,18 @@ def _build_mobile_nav(
         util_section = ""
     return f'<nav class="mob-nav">{"".join(mob_parts)}</nav>{util_section}'
 
+def _more_below(node: Node) -> str:
+    if not node.more_below:
+        return ""
+    n = node.more_below
+    return f'<div class="leaf"><p>Plus {n:,} more page{"s" if n != 1 else ""} below this one, not shown in the prototype.</p></div>'
+
 def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], nav_style: str) -> Tuple[str, str, str, str]:
     sidebar_html = ""
     if node is root:
         children_block = ""
     elif nav_style == "sidebar" and len(anc) > 1:
-        children_block = ""
+        children_block = f'<section class="children">{_more_below(node)}</section>' if node.more_below else ""
         sidebar_html = build_section_sidebar(anc[1], here, node)
     elif node.children:
         cards = "".join(
@@ -399,17 +414,19 @@ def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], na
             f'<span class="card-arrow">&rarr;</span></a>'
             for c in node.children
         )
-        children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
+        children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div>{_more_below(node)}</section>'
+    elif node.more_below:
+        children_block = f'<section class="children"><h2>In this section</h2>{_more_below(node)}</section>'
     else:
         children_block = '<section class="children leaf"><h2>Leaf page</h2><p>No sub-pages. This is a destination.</p></section>'
     layout_open  = '<div class="page-layout">' if sidebar_html else ""
     layout_close = "</div>"                    if sidebar_html else ""
     return sidebar_html, children_block, layout_open, layout_close
 
-def _build_global_nav(root: Node, here: str, section_of_node: Optional[Node], settings: Settings) -> str:
+def _build_global_nav(nav: Node, here: str, active_paths: Set[str], settings: Settings) -> str:
     nav_parts = []
-    for c in root.children:
-        link = f'<a class="{_nav_classes(c, section_of_node)}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+    for c in nav.children:
+        link = f'<a class="{_nav_classes(c, active_paths)}"{_href_attr(here, c)}>{esc(c.title)}</a>'
         if c.children and settings.mega_menu:
             nav_parts.append(f'<div class="nav-item has-mega">{link}{nav_mega_panel(c, here)}</div>')
         elif c.children and settings.dropdown_depth > 0:
@@ -419,9 +436,9 @@ def _build_global_nav(root: Node, here: str, section_of_node: Optional[Node], se
             nav_parts.append(link)
     return "".join(nav_parts)
 
-def _nav_classes(node: Node, active_node: Optional[Node]) -> str:
+def _nav_classes(node: Node, active_paths: Set[str]) -> str:
     return " ".join(filter(None, [
-        "active" if node is active_node else "",
+        "active" if node.out_path in active_paths else "",
         "nav-btn" if node.is_button else "",
     ]))
 
@@ -438,10 +455,12 @@ def render_page(node: Node, site: Site, settings: Settings = Settings()) -> str:
     header_h_style = "<style>:root{--header-h:84px}</style>" if utility_nav_html else ""
 
     anc = ancestors(node)
-    section_of_node = anc[1] if len(anc) > 1 else None
-    nav_items = _build_global_nav(root, here, section_of_node, settings)
+    # A menu entry is "active" when this page is its page or sits below it.
+    active_paths = {a.out_path for a in anc[1:]}
+    nav = site.nav_root or root
+    nav_items = _build_global_nav(nav, here, active_paths, settings)
 
-    mobile_nav_html = _build_mobile_nav(root, here, section_of_node, site.utility)
+    mobile_nav_html = _build_mobile_nav(nav, here, active_paths, site.utility)
 
     # breadcrumb = the ancestor chain, last one not a link
     crumbs = anc
@@ -466,7 +485,7 @@ def render_page(node: Node, site: Site, settings: Settings = Settings()) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">{ROBOTS_META if settings.noindex else ""}
 <title>{esc(node.title)} - prototype</title>
 <link rel="stylesheet" href="{esc(css)}">{header_h_style}
 </head>
@@ -958,8 +977,13 @@ render();
 """
 
 
-def render_visual_sitemap(root: Node) -> str:
-    return VISUAL_HTML.replace("__TREE_JSON__", json.dumps(_tree_to_dict(root), ensure_ascii=False))
+ROBOTS_META = '\n<meta name="robots" content="noindex, nofollow">'
+
+def render_visual_sitemap(root: Node, noindex: bool = False) -> str:
+    # "<" is escaped so a title like "</script>" can't end the script block it sits in.
+    tree_json = json.dumps(_tree_to_dict(root), ensure_ascii=False).replace("<", "\\u003c")
+    page = VISUAL_HTML.replace("__TREE_JSON__", tree_json)
+    return page.replace('<meta charset="utf-8">', '<meta charset="utf-8">' + ROBOTS_META, 1) if noindex else page
 
 
 # --------------------------------------------------------------------------
@@ -1005,7 +1029,9 @@ def render_site(site: Site, settings: Settings = Settings()) -> Dict[str, str]:
     files = {"style.css": STYLE}
     for node in all_pages(site):
         files[node.out_path] = render_page(node, site, settings)
-    files["sitemap.html"] = render_visual_sitemap(site.root)
+    files["sitemap.html"] = render_visual_sitemap(site.root, settings.noindex)
+    if settings.noindex:
+        files["robots.txt"] = "User-agent: *\nDisallow: /\n"
     return files
 
 

@@ -142,7 +142,8 @@ def test_visual_sitemap_embeds_tree_json_safely():
     root = sp.parse_markdown("- </script><b>x\n")
     sp.assign_paths(root)
     html = sp.render_visual_sitemap(root)
-    assert html.count("</script>") == 2  # only the page's own closing tags
+    assert html.count("</script>") == 1  # only the page's own closing tag
+    assert "<b>x" not in html
 
 
 # ---- output ----------------------------------------------------------------
@@ -176,3 +177,43 @@ def test_write_dir_replaces_previous_build(tmp_path):
     sp.write_dir(sp.render_site(sp.site_from_markdown("- Old\n")), str(out))
     sp.write_dir(sp.render_site(sp.site_from_markdown("- New\n")), str(out))
     assert (out / "new/index.html").exists() and not (out / "old").exists()
+
+
+def test_noindex_marks_every_page_and_adds_robots_txt():
+    site = sp.site_from_markdown("- A\n")
+    plain = sp.render_site(site)
+    hidden = sp.render_site(site, sp.Settings(noindex=True))
+    assert "robots.txt" not in plain and 'name="robots"' not in plain["a/index.html"]
+    assert hidden["robots.txt"] == "User-agent: *\nDisallow: /\n"
+    for name in ("index.html", "a/index.html", "sitemap.html"):
+        assert '<meta name="robots" content="noindex, nofollow">' in hidden[name]
+
+
+def test_more_below_note_on_parent_page():
+    site = sp.site_from_markdown("- News\n  - Latest\n- Events\n")
+    news, events = site.root.children
+    news.more_below, events.more_below = 392, 1
+    files = sp.render_site(site)
+    assert "Plus 392 more pages below this one" in files[news.out_path]
+    assert "Plus 1 more page below this one" in files[events.out_path]
+    assert "Leaf page" not in files[events.out_path]
+
+
+def test_separate_main_menu_with_overrides_and_headings():
+    site = sp.site_from_markdown("- Admissions\n  - How to Apply\n- About\n  - Contact Us\n- Landing Page\n")
+    admissions, about, landing = site.root.children
+    apply = admissions.children[0]
+    nav = sp.Node(title="")
+    apply_entry = sp.Node(title="Apply", parent=nav, out_path=apply.out_path, is_button=True)
+    group = sp.Node(title="Our College", parent=nav, out_path="")
+    group.children = [sp.Node(title="About", parent=group, out_path=about.out_path)]
+    nav.children = [apply_entry, group]
+    site.nav_root = nav
+    files = sp.render_site(site, sp.Settings(dropdown_depth=1))
+    page = files[apply.out_path]
+    assert '<a class="active nav-btn" href="index.html">Apply</a>' in page   # active on its own page
+    assert '<a class="">Our College</a>' in page                           # heading: no link
+    assert "Landing Page</a>" not in page.split('<nav class="globalnav">')[1].split("</nav>")[0]
+    assert "landing-page/index.html" in files                                # still a real page
+    contact = files[about.children[0].out_path]
+    assert '<a class="active">Our College</a>' not in contact and 'class="active"' not in contact.split("globalnav")[1][:400]

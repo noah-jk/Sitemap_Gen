@@ -205,9 +205,11 @@ Checked against a full "Internal: All" export of whittier.edu on Nov 15, 2026: 3
 - Link picker for `redirect_to` and content targets: type-ahead search on title and URL.
 - Saved views: by section, by disposition, problems list, near-duplicate clusters sorted by traffic and inlinks (the strongest page is the natural absorber).
 
-### C. Visual tree editor
-- Designed levels only, with roll-up counts of pages beneath each node and "absorbs N pages" on combine targets.
-- Add, rename, drag to reorder or re-parent. Seeded from the existing canvas view.
+### C. Sitemap and navigation (two structures)
+The sitemap and the navigation are related but not identical. The sitemap says where every page lives; the menus are a smaller, curated structure built by adding, not by removing what doesn't belong.
+- **Sitemap tab:** every kept page, nested by `parent_id`, with roll-up counts of pages beneath each node and "absorbs N pages" on combine targets. Add new pages, rename, drag to reorder or re-parent. Seeded from URL paths at import.
+- **Navigation tab:** main menu, utility nav, and footer in a `nav_items` table. Entries point at pages or are label-only headings, can carry a shorter label than the page, and nest up to 4 levels (main) or 2 (utility, footer; footer up to 4 columns). Menus start empty. Pages can be added from the tab, from the Sitemap tab, or in bulk from the grid. Pages in no menu are standalone (landing pages, for example).
+- Grid views check the menus: "Kept but not in any menu" and "In the current navigation but not in a new menu".
 
 ### D. Prototype generation
 - Generator reads the tree from the database. Pages with `combine`, `split`, or `delete` aren't generated as separate nodes.

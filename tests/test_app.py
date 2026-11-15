@@ -13,7 +13,7 @@ PASSWORD = "correct horse battery"
 
 @pytest.fixture
 def client(tmp_path):
-    app = create_app(str(tmp_path / "data"), secure_cookies=False)
+    app = create_app(str(tmp_path / "data"), secure_cookies=False, warm_delay=None)
     from app.db import Store
     auth.create_user(Store(str(tmp_path / "data")), "noah", PASSWORD)
     with TestClient(app) as c:
@@ -184,7 +184,7 @@ def test_edit_saves_and_detects_conflicts(imported):
     assert stale.status_code == 409 and stale.json()["row"]["decision"] == "keep"
     fresh = r.json()["row"]
     assert patch(fresh, decision="merge").status_code == 400
-    assert patch(fresh, label="renamed").status_code == 400
+    assert patch(fresh, url_path="/renamed").status_code == 400
     assert patch(fresh, tok="forged", notes="x").status_code == 403
     cleared = patch(fresh, decision=None)
     assert cleared.status_code == 200 and cleared.json()["row"]["decision"] is None
@@ -307,3 +307,156 @@ def test_secure_cookie_flag_is_opt_in(tmp_path, monkeypatch, env, secure):
     with TestClient(create_app(str(tmp_path / "data"))) as c:
         cookie = c.get("/login").headers["set-cookie"].lower()
     assert ("secure" in cookie) == secure
+
+
+def test_tree_routes(imported):
+    token = grid_csrf(imported)
+    hdr = {"X-CSRF-Token": token}
+    roots = imported.get("/api/p/example/tree").json()["roots"]
+    admissions = next(r for r in roots if r["label"] == "Admissions")
+    assert admissions["descendants"] == 3
+    new = imported.post("/api/p/example/tree/pages", json={"label": "Student Life", "parent_id": None}, headers=hdr)
+    new_id = new.json()["id"]
+    r = imported.post("/api/p/example/tree/move", json={"id": admissions["id"], "parent_id": new_id, "index": 0},
+                      headers=hdr)
+    assert r.status_code == 200
+    roots = imported.get("/api/p/example/tree").json()["roots"]
+    life = next(r for r in roots if r["label"] == "Student Life")
+    assert life["is_new"] and [c["label"] for c in life["children"]] == ["Admissions"] and life["descendants"] == 4
+    loop = imported.post("/api/p/example/tree/move", json={"id": new_id, "parent_id": admissions["id"]}, headers=hdr)
+    assert loop.status_code == 400 and "under itself" in loop.json()["detail"]
+    assert imported.post("/api/p/example/tree/move", json={"id": new_id}, headers={"X-CSRF-Token": "x"}).status_code == 403
+    assert imported.delete(f"/api/p/example/tree/pages/{admissions['id']}", headers=hdr).status_code == 400
+    assert imported.delete(f"/api/p/example/tree/pages/{new_id}", headers=hdr).status_code == 200
+    assert "<h1>Sitemap</h1>" in imported.get("/p/example/tree").text
+
+
+def test_bulk_move_under_a_page(imported):
+    token = grid_csrf(imported)
+    hdr = {"X-CSRF-Token": token}
+    section = imported.post("/api/p/example/tree/pages", json={"label": "About Us"}, headers=hdr).json()["id"]
+    r = imported.post("/api/p/example/pages/bulk", headers=hdr, json={
+        "match": {"filters": [{"field": "url_path", "value": "/about/"}]}, "changes": {"parent_id": section}})
+    assert r.json()["count"] == 2
+    rows = imported.get("/api/p/example/pages", params={"filter[0][field]": "parent_label", "filter[0][value]": "About Us"}).json()
+    assert sorted(x["url_path"] for x in rows["data"]) == ["/about/contact", "/about/history"]
+    bad = imported.post("/api/p/example/pages/bulk", headers=hdr, json={"ids": [section], "changes": {"parent_id": section}})
+    assert bad.status_code == 400
+
+
+def test_prototype_preview_settings_and_zip(imported, tmp_path):
+    import io, zipfile
+    html = imported.get("/p/example/prototype").text
+    preview = re.search(r'<iframe data-src="([^"]+)"', html)[1]
+    assert 'sandbox="allow-scripts"' in html
+    with TestClient(imported.app) as anonymous:  # the preview needs no login, only the signed link
+        r = anonymous.get(preview)
+        assert r.status_code == 200
+        assert anonymous.get(preview.replace("index.html", "admissions/index.html")).status_code == 200
+        assert r.headers["content-security-policy"].startswith("sandbox allow-scripts")
+        assert r.headers["x-frame-options"] == "SAMEORIGIN"
+        css = anonymous.get(preview.replace("index.html", "style.css"))
+        assert css.headers["content-type"].startswith("text/css")
+        assert anonymous.get(preview.replace("index.html", "../../etc/passwd")).status_code == 404
+        assert anonymous.get("/preview/forged-token/index.html").status_code == 404
+    token = csrf_from(html)
+    r = imported.post("/p/example/prototype/settings", data={
+        "csrf": token, "menu": "mega", "nav_style": "sidebar", "max_depth": "1", "version_label": "v3 final!",
+        "sticky_header": "1"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("saved=1")
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    apply_id = page_by_path(imported, "/news")["id"]  # top level, so it is built even with depth 1
+    imported.post("/api/p/example/nav/pages", json={"menu": "utility", "page_ids": [apply_id]}, headers=hdr)
+    entry = imported.get("/api/p/example/nav").json()["menus"]["utility"][0]
+    imported.patch(f"/api/p/example/nav/{entry['id']}", json={"label": "Apply now"}, headers=hdr)
+    page = imported.get(preview).text
+    assert "is-sticky" in page and "Apply now" in page and "Plus 3 more pages" in imported.get(
+        preview.replace("index.html", "admissions/index.html")).text
+    z = imported.get("/p/example/prototype/download")
+    assert z.headers["content-disposition"] == 'attachment; filename="example-sitemap-v3final.zip"'
+    names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
+    assert "robots.txt" in names and "index.html" in names and "sitemap.html" in names
+
+
+def test_nav_routes(imported):
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    post = lambda path, body, h=hdr: imported.post(f"/api/p/example/nav/{path}", json=body, headers=h)
+    assert "Navigation" in imported.get("/p/example/nav").text
+    adm = page_by_path(imported, "/admissions")["id"]
+    assert post("pages", {"menu": "main", "page_ids": [adm]}).json() == {"added": 1}
+    r = post("pages", {"menu": "main", "match": {"filters": [{"field": "url_path", "value": "/admissions/"}]}})
+    assert r.json() == {"added": 3}
+    assert post("headings", {"menu": "footer", "label": "Help"}).status_code == 200
+    menus = imported.get("/api/p/example/nav").json()["menus"]
+    assert [i["display"] for i in menus["main"]][:1] == ["Admissions"] and len(menus["main"]) == 4
+    first, second = menus["main"][0]["id"], menus["main"][1]["id"]
+    assert post("move", {"id": second, "menu": "main", "parent_id": first, "index": 0}).status_code == 200
+    bad = post("move", {"id": first, "menu": "main", "parent_id": second})
+    assert bad.status_code == 400 and "inside itself" in bad.json()["detail"]
+    assert imported.patch(f"/api/p/example/nav/{first}", json={"is_button": True}, headers=hdr).status_code == 200
+    assert imported.delete(f"/api/p/example/nav/{first}", headers=hdr).status_code == 200
+    assert post("headings", {"menu": "main", "label": "X"}, h={"X-CSRF-Token": "forged"}).status_code == 403
+    assert post("pages", {"menu": "nope", "page_ids": [adm]}).status_code == 400
+
+
+def test_menu_views_and_tree_tags(imported):
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    dropped = imported.get("/api/p/example/pages", params={"view": "nav_dropped"}).json()
+    assert sorted(r["url_path"] for r in dropped["data"]) == ["/admissions", "/news"]
+    adm = page_by_path(imported, "/admissions")["id"]
+    imported.post("/api/p/example/nav/pages", json={"menu": "footer", "page_ids": [adm]}, headers=hdr)
+    dropped = imported.get("/api/p/example/pages", params={"view": "nav_dropped"}).json()
+    assert [r["url_path"] for r in dropped["data"]] == ["/news"]
+    assert page_by_path(imported, "/admissions")["menus"] == "footer"
+    roots = imported.get("/api/p/example/tree").json()["roots"]
+    assert next(r for r in roots if r["id"] == adm)["menus"] == ["footer"]
+    unplaced = imported.get("/api/p/example/pages", params={"view": "not_in_menu"}).json()
+    paths = [r["url_path"] for r in unplaced["data"]]
+    assert "/admissions" not in paths and "/" not in paths and "/gone" not in paths and "/news/story-two" not in paths
+
+
+def test_nav_sub_pages_routes(imported):
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    adm = page_by_path(imported, "/admissions")["id"]
+    r = imported.post("/api/p/example/nav/pages", json={"menu": "main", "page_ids": [adm], "subpage_depth": 9},
+                      headers=hdr)
+    assert r.json() == {"added": 4}                  # clamped to 3 levels; the sitemap only has 2 below
+    entry = imported.get("/api/p/example/nav").json()["menus"]["main"][0]
+    assert [c["display"] for c in entry["children"]] == ["Contact Us", "How to Apply"]
+    r = imported.post(f"/api/p/example/nav/{entry['id']}/subpages", json={"depth": 1}, headers=hdr)
+    assert r.json() == {"added": 0}
+    bad = imported.post(f"/api/p/example/nav/{entry['id']}/subpages", json={"depth": 1}, headers={"X-CSRF-Token": "x"})
+    assert bad.status_code == 403
+
+
+def test_prototype_builds_in_background_once_per_burst(tmp_path, monkeypatch):
+    import threading, time
+    from app import tree as tree_mod
+    from app.db import Store
+    builds = []
+    real = tree_mod.render_files
+    monkeypatch.setattr(tree_mod, "render_files", lambda conn: builds.append(1) or real(conn))
+    app = create_app(str(tmp_path / "data"), secure_cookies=False, warm_delay=0.2)
+    auth.create_user(Store(str(tmp_path / "data")), "noah", PASSWORD)
+    with TestClient(app) as c:
+        login(c)
+        make_project(c)
+        token = csrf_from(c.get("/p/example/import").text)
+        c.post("/p/example/import", data={"csrf": token},
+               files={"file": ("crawl.csv", FIXTURE.read_bytes(), "text/csv")})
+        hdr = {"X-CSRF-Token": grid_csrf(c)}
+        for name in ("One", "Two", "Three"):          # a burst of edits
+            c.post("/api/p/example/tree/pages", json={"label": name}, headers=hdr)
+        html = c.get("/p/example/prototype").text      # opens without building
+        assert builds == []
+        deadline = time.time() + 5
+        while not builds and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.3)
+        assert len(builds) == 1                        # one background build for the whole burst
+        preview = re.search(r'<iframe data-src="([^"]+)"', html)[1]
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(c.get(preview).status_code)) for _ in range(3)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert results == [200, 200, 200] and len(builds) == 1   # served from the finished build

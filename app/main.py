@@ -4,22 +4,27 @@ Run with: uvicorn app.main:create_app --factory
 """
 import csv
 import hmac
+import re
 import io
 import json
 import os
 import secrets
+import threading
 from contextlib import closing
 from datetime import date
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, config, exports, grid, importer, rules
+import sitemap2proto as sp
+from app import auth, config, exports, grid, importer, nav, rules, tree
 from app.db import DISPOSITIONS, SLUG_RE, Store, now_ms
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +33,13 @@ PAGE_SIZE_MAX = 500
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+# Generated prototype pages carry their own small inline script and style. They run sandboxed
+# (an opaque origin, no cookies, no access to the app) whether framed or opened in a tab.
+PREVIEW_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+               "style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; "
+               "form-action 'none'; frame-ancestors 'self'")
+PREVIEW_TTL = 12 * 3600
+PREVIEW_TYPES = {"html": "text/html", "css": "text/css", "txt": "text/plain"}
 
 
 class NotLoggedIn(Exception):
@@ -54,7 +66,50 @@ class ViewIn(BaseModel):
     definition: Dict[str, Any]
 
 
-def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None) -> FastAPI:
+class Move(BaseModel):
+    id: int
+    parent_id: Optional[int] = None
+    index: int = 0
+
+
+class NewPage(BaseModel):
+    label: str
+    parent_id: Optional[int] = None
+
+
+class NavAdd(BaseModel):
+    menu: str
+    parent_id: Optional[int] = None
+    page_ids: List[int] = []
+    match: Optional[Dict[str, Any]] = None
+    subpage_depth: int = 0
+
+
+class SubPages(BaseModel):
+    depth: int = 1
+
+
+class NavHeading(BaseModel):
+    menu: str
+    parent_id: Optional[int] = None
+    label: str
+
+
+class NavMove(BaseModel):
+    id: int
+    menu: str
+    parent_id: Optional[int] = None
+    index: int = 0
+
+
+class NavEdit(BaseModel):
+    label: Optional[str] = None
+    is_button: Optional[bool] = None
+
+
+def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None,
+               warm_delay: Optional[float] = 1.0) -> FastAPI:
+    """warm_delay: seconds after an edit before the prototype is rebuilt in the background (None: never)."""
     store = Store(data_directory or config.data_dir())
     store.migrate_all()
     limiter = auth.LoginLimiter()
@@ -66,13 +121,19 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         max_age=14 * 24 * 3600, same_site="strict",
         https_only=config.secure_cookies() if secure_cookies is None else secure_cookies)
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+    preview_signer = URLSafeTimedSerializer(config.secret_key(store.data_dir), salt="prototype-preview")
+    prototype_cache: Dict[str, tuple] = {}
+    cache_lock = threading.Lock()
+    build_locks: Dict[str, threading.Lock] = {}
+    warm_timers: Dict[str, threading.Timer] = {}
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = CSP
+        preview = request.url.path.startswith("/preview/")
+        response.headers["Content-Security-Policy"] = PREVIEW_CSP if preview else CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN" if preview else "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
         if not request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-store"
@@ -229,6 +290,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             return import_page(request, slug, 400, f"Couldn't read the CSV: {e}")
         finally:
             text.detach()
+        warm(slug)
         return RedirectResponse(f"/p/{slug}/import", status_code=303)
 
     # ---- exports -----------------------------------------------------------
@@ -315,6 +377,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             except rules.RuleError as e:
                 return JSONResponse({"detail": str(e), "row": row_dict(grid.one_row(conn, page_id))},
                                     status_code=400)
+            warm(slug)
             return {"row": row_dict(grid.one_row(conn, page_id)), "warning": warning}
 
     @app.post("/api/p/{slug}/pages/bulk")
@@ -331,6 +394,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 count, warning = rules.bulk_apply(conn, ids, bulk.changes)
             except rules.RuleError as e:
                 return JSONResponse({"detail": str(e)}, status_code=400)
+        warm(slug)
         return {"count": count, "warning": warning}
 
     @app.get("/api/p/{slug}/pages/{page_id}/content-targets")
@@ -378,6 +442,199 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         with closing(open_project(slug)) as conn:
             conn.execute("DELETE FROM views WHERE id = ?", (view_id,))
         return {"ok": True}
+
+    # ---- tree --------------------------------------------------------------
+
+    @app.get("/p/{slug}/tree", response_class=HTMLResponse)
+    def tree_view(request: Request, slug: str):
+        require_user(request)
+        open_project(slug).close()
+        return render(request, "tree.html", slug=slug, project=project_name(slug), tab="tree")
+
+    @app.get("/api/p/{slug}/tree")
+    def tree_api(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            roots = [r.to_dict() for r in tree.load(conn)]
+            menus = nav.page_menus(conn)
+
+        def tag(nodes):
+            for n in nodes:
+                n["menus"] = menus.get(n["id"], [])
+                tag(n["children"])
+        tag(roots)
+        return {"roots": roots}
+
+    def tree_write(request: Request, slug: str, action):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        with closing(open_project(slug)) as conn:
+            try:
+                result = action(conn)
+                warm(slug)
+                return result
+            except KeyError:
+                raise HTTPException(404, "That page no longer exists.")
+            except rules.RuleError as e:
+                return JSONResponse({"detail": str(e)}, status_code=400)
+
+    @app.post("/api/p/{slug}/tree/move")
+    def tree_move(request: Request, slug: str, move: Move):
+        return tree_write(request, slug, lambda conn: tree.move(conn, move.id, move.parent_id, move.index) or {"ok": True})
+
+    @app.post("/api/p/{slug}/tree/pages")
+    def tree_add(request: Request, slug: str, page: NewPage):
+        return tree_write(request, slug, lambda conn: {"id": tree.create_page(conn, page.label, page.parent_id)})
+
+    @app.delete("/api/p/{slug}/tree/pages/{page_id}")
+    def tree_delete(request: Request, slug: str, page_id: int):
+        return tree_write(request, slug, lambda conn: tree.delete_new_page(conn, page_id) or {"ok": True})
+
+    # ---- navigation (menus) ------------------------------------------------
+
+    @app.get("/p/{slug}/nav", response_class=HTMLResponse)
+    def nav_view(request: Request, slug: str):
+        require_user(request)
+        open_project(slug).close()
+        return render(request, "nav.html", slug=slug, project=project_name(slug), tab="nav",
+                      menus=[(m, nav.MENU_NAMES[m], nav.MAX_LEVELS[m]) for m in nav.MENUS])
+
+    @app.get("/api/p/{slug}/nav")
+    def nav_api(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            return {"menus": nav.load(conn)}
+
+    @app.post("/api/p/{slug}/nav/pages")
+    def nav_add_pages(request: Request, slug: str, body: NavAdd):
+        def run(conn):
+            ids = body.page_ids
+            if body.match is not None:
+                filters = [f for f in body.match.get("filters", []) if isinstance(f, dict)]
+                ids = grid.matching_ids(conn, filters, body.match.get("view"))
+            if not ids:
+                raise rules.RuleError(["No pages chosen."])
+            depth = max(0, min(body.subpage_depth, 3))
+            return {"added": nav.add_pages(conn, body.menu, body.parent_id, ids, depth)}
+        return tree_write(request, slug, run)
+
+    @app.post("/api/p/{slug}/nav/{item_id}/subpages")
+    def nav_subpages(request: Request, slug: str, item_id: int, body: SubPages):
+        depth = max(1, min(body.depth, 3))
+        return tree_write(request, slug, lambda conn: {"added": nav.add_subpages(conn, item_id, depth)})
+
+    @app.post("/api/p/{slug}/nav/headings")
+    def nav_add_heading(request: Request, slug: str, body: NavHeading):
+        return tree_write(request, slug, lambda conn: {"id": nav.add_heading(conn, body.menu, body.parent_id, body.label)})
+
+    @app.post("/api/p/{slug}/nav/move")
+    def nav_move(request: Request, slug: str, body: NavMove):
+        return tree_write(request, slug,
+                          lambda conn: nav.move(conn, body.id, body.menu, body.parent_id, body.index) or {"ok": True})
+
+    @app.patch("/api/p/{slug}/nav/{item_id}")
+    def nav_edit(request: Request, slug: str, item_id: int, body: NavEdit):
+        return tree_write(request, slug,
+                          lambda conn: nav.update(conn, item_id, body.label, body.is_button) or {"ok": True})
+
+    @app.delete("/api/p/{slug}/nav/{item_id}")
+    def nav_remove(request: Request, slug: str, item_id: int):
+        return tree_write(request, slug, lambda conn: nav.remove(conn, item_id) or {"ok": True})
+
+    # ---- prototype ---------------------------------------------------------
+
+    def prototype_files(slug: str, conn) -> Dict[str, str]:
+        """The built prototype, rebuilt only when something it depends on changed. One build per
+        project at a time: a request that arrives mid-build waits for it instead of starting another."""
+        with cache_lock:
+            lock = build_locks.setdefault(slug, threading.Lock())
+        with lock:
+            current = tree.stamp(conn)
+            cached = prototype_cache.get(slug)
+            if cached and cached[0] == current:
+                return cached[1]
+            files = tree.render_files(conn)
+            prototype_cache[slug] = (current, files)
+            return files
+
+    def warm(slug: str) -> None:
+        """Rebuild the prototype shortly after an edit, so the Prototype tab is ready when opened.
+        Edits in quick succession restart the countdown, so a burst of edits means one build."""
+        if warm_delay is None:
+            return
+
+        def run() -> None:
+            with closing(store.project(slug)) as conn:
+                prototype_files(slug, conn)
+
+        with cache_lock:
+            previous = warm_timers.pop(slug, None)
+            if previous:
+                previous.cancel()
+            timer = threading.Timer(warm_delay, run)
+            timer.daemon = True
+            warm_timers[slug] = timer
+            timer.start()
+
+    @app.get("/p/{slug}/prototype", response_class=HTMLResponse)
+    def prototype_view(request: Request, slug: str, saved: str = "", error: str = ""):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            settings = tree.settings_row(conn)
+            pages = sum(1 for _ in tree.walk(tree.load(conn)))
+            menu_counts = {m: len(items) for m, items in nav.load(conn).items()}
+        token = preview_signer.dumps(slug)
+        return render(request, "prototype.html", slug=slug, project=project_name(slug), tab="prototype",
+                      settings=settings, preview=f"/preview/{token}/index.html", pages=pages, menu_counts=menu_counts,
+                      saved=bool(saved), error=error[:300])
+
+    @app.post("/p/{slug}/prototype/settings")
+    def prototype_settings(request: Request, slug: str, nav_style: str = Form("grid"),
+                           menu: str = Form("flat"), dropdown_depth: int = Form(2),
+                           sticky_header: str = Form(""), max_depth: int = Form(0),
+                           version_label: str = Form("v1"), csrf: str = Form("")):
+        require_user(request)
+        check_csrf(request, csrf)
+        mega = menu == "mega"
+        depth = max(1, min(dropdown_depth, 4)) if menu == "dropdown" else 0
+        version = re.sub(r"[^A-Za-z0-9._-]", "", version_label)[:20] or "v1"
+        try:
+            sp.Settings(nav_style=nav_style, dropdown_depth=depth, mega_menu=mega)
+        except ValueError as e:
+            return RedirectResponse(f"/p/{slug}/prototype?error={quote(str(e))}", status_code=303)
+        with closing(open_project(slug)) as conn:
+            conn.execute(
+                "UPDATE settings SET nav_style = ?, dropdown_depth = ?, mega_menu = ?, sticky_header = ?, "
+                "max_depth = ?, version_label = ?",
+                (nav_style, depth, int(mega), int(bool(sticky_header)), max(0, min(max_depth, 10)), version))
+        warm(slug)
+        return RedirectResponse(f"/p/{slug}/prototype?saved=1", status_code=303)
+
+    @app.get("/p/{slug}/prototype/download")
+    def prototype_download(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            files = prototype_files(slug, conn)
+            version = tree.settings_row(conn)["version_label"]
+        filename = f"{slug}-sitemap-{version}.zip"
+        return Response(sp.write_zip(files), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    @app.get("/preview/{token}/{path:path}")
+    def preview(token: str, path: str):
+        try:
+            slug = preview_signer.loads(token, max_age=PREVIEW_TTL)
+        except BadSignature:
+            raise HTTPException(404)
+        with closing(open_project(slug)) as conn:
+            files = prototype_files(slug, conn)
+        path = path or "index.html"
+        if path.endswith("/"):
+            path += "index.html"
+        if path not in files:
+            raise HTTPException(404)
+        kind = PREVIEW_TYPES.get(path.rsplit(".", 1)[-1], "text/plain")
+        return Response(files[path].encode("utf-8"), media_type=f"{kind}; charset=utf-8")
 
     return app
 

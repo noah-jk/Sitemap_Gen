@@ -134,6 +134,27 @@ PROJECT_MIGRATIONS: List[str] = [
       definition TEXT NOT NULL
     );
     """,
+    """
+    ALTER TABLE settings ADD COLUMN footer_md TEXT NOT NULL DEFAULT '';
+    ALTER TABLE settings ADD COLUMN utility_md TEXT NOT NULL DEFAULT '';
+    ALTER TABLE settings ADD COLUMN max_depth INTEGER NOT NULL DEFAULT 0 CHECK(max_depth >= 0);
+    """,
+    """
+    CREATE TABLE nav_items(
+      id INTEGER PRIMARY KEY,
+      menu TEXT NOT NULL CHECK(menu IN ('main','utility','footer')),
+      parent_id INTEGER REFERENCES nav_items(id) ON DELETE CASCADE,
+      page_id INTEGER REFERENCES pages(id) ON DELETE CASCADE,
+      label TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_button INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0,
+      CHECK(page_id IS NOT NULL OR label <> ''),
+      CHECK(parent_id IS NULL OR parent_id <> id)
+    );
+    CREATE INDEX nav_items_tree ON nav_items(menu, parent_id, sort_order);
+    CREATE INDEX nav_items_page ON nav_items(page_id);
+    """,
 ]
 
 
