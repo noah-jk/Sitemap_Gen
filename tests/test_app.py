@@ -13,7 +13,7 @@ PASSWORD = "correct horse battery"
 
 @pytest.fixture
 def client(tmp_path):
-    app = create_app(str(tmp_path / "data"), secure_cookies=False)
+    app = create_app(str(tmp_path / "data"), secure_cookies=False, warm_delay=None)
     from app.db import Store
     auth.create_user(Store(str(tmp_path / "data")), "noah", PASSWORD)
     with TestClient(app) as c:
@@ -347,7 +347,7 @@ def test_bulk_move_under_a_page(imported):
 def test_prototype_preview_settings_and_zip(imported, tmp_path):
     import io, zipfile
     html = imported.get("/p/example/prototype").text
-    preview = re.search(r'<iframe src="([^"]+)"', html)[1]
+    preview = re.search(r'<iframe data-src="([^"]+)"', html)[1]
     assert 'sandbox="allow-scripts"' in html
     with TestClient(imported.app) as anonymous:  # the preview needs no login, only the signed link
         r = anonymous.get(preview)
@@ -427,3 +427,36 @@ def test_nav_sub_pages_routes(imported):
     assert r.json() == {"added": 0}
     bad = imported.post(f"/api/p/example/nav/{entry['id']}/subpages", json={"depth": 1}, headers={"X-CSRF-Token": "x"})
     assert bad.status_code == 403
+
+
+def test_prototype_builds_in_background_once_per_burst(tmp_path, monkeypatch):
+    import threading, time
+    from app import tree as tree_mod
+    from app.db import Store
+    builds = []
+    real = tree_mod.render_files
+    monkeypatch.setattr(tree_mod, "render_files", lambda conn: builds.append(1) or real(conn))
+    app = create_app(str(tmp_path / "data"), secure_cookies=False, warm_delay=0.2)
+    auth.create_user(Store(str(tmp_path / "data")), "noah", PASSWORD)
+    with TestClient(app) as c:
+        login(c)
+        make_project(c)
+        token = csrf_from(c.get("/p/example/import").text)
+        c.post("/p/example/import", data={"csrf": token},
+               files={"file": ("crawl.csv", FIXTURE.read_bytes(), "text/csv")})
+        hdr = {"X-CSRF-Token": grid_csrf(c)}
+        for name in ("One", "Two", "Three"):          # a burst of edits
+            c.post("/api/p/example/tree/pages", json={"label": name}, headers=hdr)
+        html = c.get("/p/example/prototype").text      # opens without building
+        assert builds == []
+        deadline = time.time() + 5
+        while not builds and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.3)
+        assert len(builds) == 1                        # one background build for the whole burst
+        preview = re.search(r'<iframe data-src="([^"]+)"', html)[1]
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(c.get(preview).status_code)) for _ in range(3)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert results == [200, 200, 200] and len(builds) == 1   # served from the finished build

@@ -107,7 +107,9 @@ class NavEdit(BaseModel):
     is_button: Optional[bool] = None
 
 
-def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None) -> FastAPI:
+def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None,
+               warm_delay: Optional[float] = 1.0) -> FastAPI:
+    """warm_delay: seconds after an edit before the prototype is rebuilt in the background (None: never)."""
     store = Store(data_directory or config.data_dir())
     store.migrate_all()
     limiter = auth.LoginLimiter()
@@ -122,6 +124,8 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     preview_signer = URLSafeTimedSerializer(config.secret_key(store.data_dir), salt="prototype-preview")
     prototype_cache: Dict[str, tuple] = {}
     cache_lock = threading.Lock()
+    build_locks: Dict[str, threading.Lock] = {}
+    warm_timers: Dict[str, threading.Timer] = {}
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -286,6 +290,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             return import_page(request, slug, 400, f"Couldn't read the CSV: {e}")
         finally:
             text.detach()
+        warm(slug)
         return RedirectResponse(f"/p/{slug}/import", status_code=303)
 
     # ---- exports -----------------------------------------------------------
@@ -372,6 +377,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             except rules.RuleError as e:
                 return JSONResponse({"detail": str(e), "row": row_dict(grid.one_row(conn, page_id))},
                                     status_code=400)
+            warm(slug)
             return {"row": row_dict(grid.one_row(conn, page_id)), "warning": warning}
 
     @app.post("/api/p/{slug}/pages/bulk")
@@ -388,6 +394,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 count, warning = rules.bulk_apply(conn, ids, bulk.changes)
             except rules.RuleError as e:
                 return JSONResponse({"detail": str(e)}, status_code=400)
+        warm(slug)
         return {"count": count, "warning": warning}
 
     @app.get("/api/p/{slug}/pages/{page_id}/content-targets")
@@ -463,7 +470,9 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         check_csrf(request, request.headers.get("X-CSRF-Token"))
         with closing(open_project(slug)) as conn:
             try:
-                return action(conn)
+                result = action(conn)
+                warm(slug)
+                return result
             except KeyError:
                 raise HTTPException(404, "That page no longer exists.")
             except rules.RuleError as e:
@@ -535,23 +544,44 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     # ---- prototype ---------------------------------------------------------
 
     def prototype_files(slug: str, conn) -> Dict[str, str]:
-        current = tree.stamp(conn)
+        """The built prototype, rebuilt only when something it depends on changed. One build per
+        project at a time: a request that arrives mid-build waits for it instead of starting another."""
         with cache_lock:
+            lock = build_locks.setdefault(slug, threading.Lock())
+        with lock:
+            current = tree.stamp(conn)
             cached = prototype_cache.get(slug)
             if cached and cached[0] == current:
                 return cached[1]
-        files = tree.render_files(conn)
-        with cache_lock:
+            files = tree.render_files(conn)
             prototype_cache[slug] = (current, files)
-        return files
+            return files
+
+    def warm(slug: str) -> None:
+        """Rebuild the prototype shortly after an edit, so the Prototype tab is ready when opened.
+        Edits in quick succession restart the countdown, so a burst of edits means one build."""
+        if warm_delay is None:
+            return
+
+        def run() -> None:
+            with closing(store.project(slug)) as conn:
+                prototype_files(slug, conn)
+
+        with cache_lock:
+            previous = warm_timers.pop(slug, None)
+            if previous:
+                previous.cancel()
+            timer = threading.Timer(warm_delay, run)
+            timer.daemon = True
+            warm_timers[slug] = timer
+            timer.start()
 
     @app.get("/p/{slug}/prototype", response_class=HTMLResponse)
     def prototype_view(request: Request, slug: str, saved: str = "", error: str = ""):
         require_user(request)
         with closing(open_project(slug)) as conn:
             settings = tree.settings_row(conn)
-            files = prototype_files(slug, conn)
-            pages = sum(1 for name in files if name.endswith(".html")) - 1
+            pages = sum(1 for _ in tree.walk(tree.load(conn)))
             menu_counts = {m: len(items) for m, items in nav.load(conn).items()}
         token = preview_signer.dumps(slug)
         return render(request, "prototype.html", slug=slug, project=project_name(slug), tab="prototype",
@@ -577,6 +607,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 "UPDATE settings SET nav_style = ?, dropdown_depth = ?, mega_menu = ?, sticky_header = ?, "
                 "max_depth = ?, version_label = ?",
                 (nav_style, depth, int(mega), int(bool(sticky_header)), max(0, min(max_depth, 10)), version))
+        warm(slug)
         return RedirectResponse(f"/p/{slug}/prototype?saved=1", status_code=303)
 
     @app.get("/p/{slug}/prototype/download")

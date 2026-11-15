@@ -145,3 +145,11 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .results li button[aria-pressed="true"] { background: var(--paper); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
 @media (min-width: 1100px) { .menus { grid-template-columns: 3fr 2fr; } .menu-panel[data-menu="main"] { grid-row: span 2; } }
 .tag.menu-tag { color: var(--accent); border-color: var(--accent); background: none; }
+.proto-frame { position: relative; }
+.building { position: absolute; inset: 1px; display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: var(--card); border-radius: 10px; color: var(--muted); z-index: 1; }
+.building[hidden] { display: none; }
+.spinner { width: 18px; height: 18px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+  animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
