@@ -109,9 +109,12 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 | `id` | Stable identity. Everything links by ID, never by title. |
 | `current_url` | Unique when set. Empty for planned pages. |
 | `is_new` | True for pages that don't exist yet (often the absorber in a combine). |
-| crawl columns | Title, H1, status code, indexability, word count, inlinks, crawl depth. |
-| traffic columns | Sessions (GA4) and clicks/impressions (Search Console), via Screaming Frog's API connections. Optional. |
-| duplicate columns | Screaming Frog's near-duplicate count and closest similarity match. Optional. |
+| crawl columns | Title, H1, meta description, canonical, status code, crawl depth, inlinks, unique inlinks, % of total, hash. Indexability and word count when present. |
+| `label` | Title with the site-wide suffix removed. Used in the grid, tree, and prototype. |
+| `in_current_nav` | True when the page is linked from every page (derived from `% of Total`). |
+| traffic columns | GA4 sessions, views, engaged sessions, engagement rate, key events; Search Console clicks/impressions if connected. Optional. |
+| duplicate columns | Near-duplicate count and closest match, when Crawl Analysis ran. Optional. |
+| `crawl_extra` | JSON of every unmapped crawl column. |
 | `disposition` | `keep` / `delete` / `review` / `combine` / `split` (`CHECK` constraint). |
 | `redirect_to` | Foreign key to one row: where the old URL sends visitors. |
 | `status` | `proposed` / `approved` / `done`. Progress, kept separate from disposition. |
@@ -131,6 +134,8 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 
 - **`settings`** (one row per project file): nav style, dropdown depth, mega menu, sticky header, footer columns, utility nav, version label.
 - **`views`**: saved grid views as filter and sort JSON (by section, by disposition, problems, near-duplicates).
+- **`existing_redirects`**: redirects already live on the site (source, target, type), from the crawl's 3xx rows. The redirect map export resolves against these so a new redirect never points into an old chain. The sample already had one: `/admission/our/get` → `http://www.whittier.edu/admission/our/visit` → `admission.whittier.edu/portal/visit`.
+- **`imports`**: one row per crawl upload (file name, crawl timestamp, GA4 date range).
 - **`projects.db`**: project list (slug, client name, created) and `users`.
 
 ### How each disposition uses the links
@@ -156,12 +161,29 @@ Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that show
 ## Capabilities
 
 ### A. Crawl import
-- Stdlib `csv`. Expected columns include Address, Status Code, Indexability, Title 1, H1-1, Word Count, Crawl Depth, Inlinks, plus optional traffic and near-duplicate columns. **Verify against a real export.**
-- Filter non-HTML, redirects, noindex, errors; normalize query strings and trailing slashes.
-- Initial tree position comes from URL path segments. URL hierarchy often differs from navigation on higher-ed sites, so treat it as a starting guess.
+
+Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4 integration on) on Nov 15, 2026.
+
+- Stdlib `csv`, reading the header by name (Screaming Frog's column order changes between versions). Mapped columns: Address, Content Type, Status Code, Title 1, H1-1 (fall back to H1-2), Meta Description 1, Canonical Link Element 1, Crawl Depth, Inlinks, Unique Inlinks, % of Total, Hash, Redirect URL, Redirect Type, GA4 Sessions / Views / Engaged sessions / Engagement rate / Key events. Every other column goes into a `crawl_extra` JSON field so nothing is lost.
+- **Columns that were empty in the sample:** Indexability, Word Count, Link Score, and the near-duplicate columns. Link Score and near-duplicates only fill in after Crawl Analysis runs, and near-duplicates must be turned on in the crawl config. The importer treats all of these as optional.
+- **What gets imported:** the export mixes pages, redirects, errors, and files (the sample had 69 × 200, 8 × 301, 1 × 302, 1 × 403, 1 PDF).
+  - HTML 200s become `pages` rows.
+  - 3xx rows go into `existing_redirects` (source, target, type), not `pages`.
+  - 4xx/5xx rows become pages with disposition `review` and a reason.
+  - PDFs and other files become rows with `page_type = document`, kept out of the tree but in the audit.
+- **Normalization:** one canonical host per project (the sample had both `whittier.edu` and `www.whittier.edu`), strip trailing slashes except on the root, drop fragments, sort or strip query strings by rule. Redirect targets may be off-site (`admission.whittier.edu`, `wcpoets.com`) and are kept as-is.
+- **Labels:** titles carry a site-wide suffix (" | Whittier College" on 67 of 69). Detect the most common suffix and store a cleaned `label` for the grid, tree, and prototype; keep the raw title.
+- **Current-nav flag:** `% of Total` splits cleanly into ~52-54% (linked from every page: header, footer, or utility nav) and ~0-2%. Pages above a threshold get `in_current_nav = true`, which shows the existing global navigation in the grid for free.
+- **Ignore:** H2s (the sample's H2-1/H2-2 are nav labels on every page), Last Modified (the server returns the crawl time, not the content date), GA4 Total revenue, and the semantic-similarity columns (they need an external AI provider).
+- **Initial tree position:** URL path segments are a weak guess here. Student support pages sit at `/counseling`, `/studenthealth`, `/accessibility`, `/caas`, and `/campuslife/studentsupport`. If the site has breadcrumbs, a Screaming Frog Custom Extraction of the breadcrumb trail gives a better starting tree; use URL segments only as a fallback.
+- **Collections:** high-volume patterns such as `/calendar/*` (events) and `/news/*` (posts) roll up into one collection node with a count in the tree. Every row still appears in the grid.
+- **Exact duplicates:** rows with the same `Hash` are exact duplicates with no near-duplicate setting needed.
+- **Import metadata:** an `imports` row per upload records the file name, crawl timestamp, and GA4 date range (the CSV doesn't contain the range, so the import form asks for it).
 - Re-importing a newer crawl updates rows by URL without losing decisions. Pages missing from the new crawl are flagged, not deleted.
-- Rules at import time handle the obvious cases: 404s, redirects, and noindex pages get a default disposition of `review` with a reason.
 - Upload limits on the import form: size cap, CSV only, parsed in a background task so a big crawl doesn't block the app.
+- Crawl files never go in the repo (it's public); `*.csv` is gitignored.
+
+**Screaming Frog settings for real crawls:** connect GA4 (and Search Console if available), turn on near-duplicates, add a Custom Extraction for breadcrumbs if the site has them, run Crawl Analysis before exporting, export "Internal: All".
 
 ### B. Content cleanup in the grid
 - Bulk-assign dispositions and status from a selection action bar.
@@ -180,7 +202,7 @@ Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that show
 
 ### E. Exports
 - **Prototype zip**, built in memory, for manual S3 upload: `robots.txt` disallowing everything, `noindex` meta tags, filename with project and version (`clientname-sitemap-v3.zip`). No AWS credentials on the homelab.
-- **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved.
+- **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved, including chains through `existing_redirects`.
 - **Content audit** as CSV or XLSX for the client. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
 - **Markdown sitemap**, for the existing CLI.
 
@@ -210,7 +232,8 @@ Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that show
 - Is the prototype internal-only or client-presentable?
 - Is the Octopus-style page-thumbnail look essential, or is a clean tree enough?
 - Existing S3 bucket and CloudFront setup for client prototypes?
-- A sanitized Screaming Frog export to test against, ideally with near-duplicate and GA4/Search Console columns turned on.
+- The hand-cleaned version of the sample crawl, to see which cleanup steps the importer should automate.
+- Do PDFs and other documents belong in the client audit, or only HTML pages?
 - A domain on Cloudflare for the tunnel (needed by phase 5).
 - When the coworker joins, do they need their own login only, or also per-project permissions?
 
@@ -218,6 +241,7 @@ Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that show
 
 - Building grid features NocoDB would have provided (link picker, saved views, bulk edit). Keep them minimal and driven by the real workflow from phase 0.
 - SQLite allows one writer at a time. Fine for one or two people; if the team grows to many simultaneous editors, move to Postgres (SQL kept portable for this).
-- URL structure may mislead on sites with legacy URLs.
+- URL structure misleads on sites with legacy URLs (confirmed in the sample crawl). Breadcrumb extraction is the mitigation.
+- Inlink counts are inflated by sitewide navigation (2,800+ for every nav-linked page in the sample), so they barely separate pages. Traffic is the better signal for choosing which page absorbs a combine.
 - The public tree-test endpoint is the first internet-facing homelab service. It's isolated by design but still needs its own review.
 - Scope: custom code should stay limited to the importer, the grid and its target model, the visual top levels, generation, exports, and the tree test.
