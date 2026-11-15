@@ -217,3 +217,30 @@ def test_separate_main_menu_with_overrides_and_headings():
     assert "landing-page/index.html" in files                                # still a real page
     contact = files[about.children[0].out_path]
     assert '<a class="active">Our College</a>' not in contact and 'class="active"' not in contact.split("globalnav")[1][:400]
+
+
+@pytest.mark.parametrize("page_type,expect,absent", [
+    ("landing", ['<span class="page-type">Landing page</span>', 'class="card"', "wf-cta"], ["wf-rows"]),
+    ("listing", ["wf-filters", "wf-rows", "wf-pager", "394 items", ">Spring &lt;Gala&gt;</a>"], ["In this section"]),
+    ("list", ['<ul class="wf-links">', ">Spring &lt;Gala&gt;</a>"], ["wf-filters"]),
+    ("article", ["wf-cols", "<h2>Related</h2>"], ["Leaf page"]),
+    ("form", ["wf-form", "wf-field", ">Submit</span>"], ["wf-rows"]),
+])
+def test_page_type_wireframes(page_type, expect, absent):
+    site = sp.site_from_markdown("- Events\n  - Spring <Gala>\n  - Fall Fair\n")
+    events = site.root.children[0]
+    events.page_type, events.more_below = page_type, 392
+    page = sp.render_site(site)[events.out_path]
+    for text in expect:
+        assert text in page, text
+    for text in absent:
+        assert text not in page, text
+    assert "<Gala>" not in page
+
+
+def test_untyped_and_home_pages_keep_the_default_layout():
+    site = sp.site_from_markdown("- A\n")
+    site.root.page_type = "landing"           # the home page never takes a type
+    files = sp.render_site(site)
+    assert "page-type" not in files["index.html"].split("</style>")[-1].split("<main>")[0]
+    assert "Leaf page" in files["a/index.html"] and 'class="page-type"' not in files["a/index.html"]

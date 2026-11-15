@@ -423,6 +423,78 @@ def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], na
     layout_close = "</div>"                    if sidebar_html else ""
     return sidebar_html, children_block, layout_open, layout_close
 
+# ---- page types: wireframes built from blocks --------------------------------
+# Each type is a list of blocks. A later "content blocks" feature can let a page
+# override its type's list without changing how blocks render.
+PAGE_TYPES = {"landing": "Landing page", "listing": "Listing page", "list": "List page",
+              "article": "Article", "form": "Form page"}
+
+def _wire_text(lines: int = 4) -> str:
+    return '<div class="wire wire-title"></div>' + "".join('<div class="wire wire-line"></div>' for _ in range(lines))
+
+def _block_intro(node: Node, here: str) -> str:
+    return '<section class="wf">' + "".join('<div class="wire wire-line"></div>' for _ in range(2)) + "</section>"
+
+def _block_cards(node: Node, here: str) -> str:
+    cards = "".join(
+        f'<a class="card" href="{esc(rel(here, c.out_path))}"><span class="card-title">{esc(c.title)}</span>'
+        f'<span class="card-arrow">&rarr;</span></a>' for c in node.children
+    ) or "".join('<div class="card"><span class="wire wire-line wf-card-wire"></span></div>' for _ in range(3))
+    return f'<section class="children wf"><h2>In this section</h2><div class="grid">{cards}</div>{_more_below(node)}</section>'
+
+def _block_cta(node: Node, here: str) -> str:
+    return '<section class="wf wf-cta"><div class="wire wire-line"></div><span class="wf-button">Call to action</span></section>'
+
+def _block_filters(node: Node, here: str) -> str:
+    return ('<section class="wf wf-filters"><span class="wf-input">Search…</span>'
+            '<span class="wf-input">Category ▾</span><span class="wf-input">Date ▾</span></section>')
+
+def _block_rows(node: Node, here: str) -> str:
+    total = len(node.children) + node.more_below
+    rows = "".join(
+        f'<li><a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a><div class="wire wire-line"></div></li>'
+        for c in node.children
+    )
+    rows += "".join('<li><div class="wire wire-line wf-row-title"></div><div class="wire wire-line"></div></li>'
+                    for _ in range(min(node.more_below, max(0, 6 - len(node.children)))))
+    if not rows:
+        rows = "".join('<li><div class="wire wire-line wf-row-title"></div><div class="wire wire-line"></div></li>'
+                       for _ in range(4))
+    count = f'<p class="wf-count">{total:,} item{"s" if total != 1 else ""}</p>' if total else ""
+    return f'<section class="wf">{count}<ul class="wf-rows">{rows}</ul></section>'
+
+def _block_pager(node: Node, here: str) -> str:
+    return ('<nav class="wf wf-pager" aria-label="Pages"><span>‹ Prev</span><span class="current">1</span>'
+            '<span>2</span><span>3</span><span>Next ›</span></nav>')
+
+def _block_links(node: Node, here: str) -> str:
+    items = "".join(f'<li><a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a></li>' for c in node.children)
+    items = items or "".join('<li><div class="wire wire-line"></div></li>' for _ in range(6))
+    return f'<section class="wf"><ul class="wf-links">{items}</ul>{_more_below(node)}</section>'
+
+def _block_body(node: Node, here: str) -> str:
+    related = "".join(f'<a href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>' for c in node.children)
+    related = related or "".join('<div class="wire wire-line"></div>' for _ in range(3))
+    return (f'<section class="wf wf-cols"><div class="content">{_wire_text()}<div class="wire wire-block"></div>'
+            f'{_wire_text(3)}</div><aside class="wf-aside"><h2>Related</h2>{related}</aside></section>'
+            f'{_more_below(node)}')
+
+def _block_fields(node: Node, here: str) -> str:
+    fields = "".join('<div class="wf-field"><div class="wire wire-line"></div><span class="wf-input"></span></div>'
+                     for _ in range(5))
+    return f'<section class="wf wf-form">{fields}<span class="wf-button">Submit</span></section>{_more_below(node)}'
+
+WIREFRAMES = {
+    "landing": [_block_intro, _block_cards, _block_cta],
+    "listing": [_block_intro, _block_filters, _block_rows, _block_pager],
+    "list": [_block_intro, _block_links],
+    "article": [_block_body],
+    "form": [_block_intro, _block_fields],
+}
+
+def _typed_body(node: Node, here: str) -> str:
+    return "".join(block(node, here) for block in WIREFRAMES[node.page_type])
+
 def _build_global_nav(nav: Node, here: str, active_paths: Set[str], settings: Settings) -> str:
     nav_parts = []
     for c in nav.children:
@@ -473,6 +545,8 @@ def render_page(node: Node, site: Site, settings: Settings = Settings()) -> str:
     sidebar_html, children_block, layout_open, layout_close = _build_children_block(node, root, here, anc, settings.nav_style)
 
     footer_inner = _build_footer_inner(site.footer, here)
+    typed = node is not root and node.page_type in PAGE_TYPES
+    type_tag = f'<span class="page-type">{PAGE_TYPES[node.page_type]}</span>' if typed else ""
 
     # deliberately low-fidelity placeholder body
     skeleton = (
@@ -498,16 +572,16 @@ def render_page(node: Node, site: Site, settings: Settings = Settings()) -> str:
   </button>
 </header>{util_bar_close}
 <div class="page-banner">
-  <h1>{esc(node.title)}</h1>
+  <h1>{esc(node.title)}{type_tag}</h1>
 </div>
 <div class="breadcrumb">{crumb_html}</div>
 {layout_open}
 {sidebar_html}
 <main>
-  {children_block}
+{_typed_body(node, here) if typed else f"""  {children_block}
   <section class="content">
     {skeleton}
-  </section>
+  </section>"""}
 </main>
 {layout_close}
 <footer>{footer_inner}</footer>
@@ -782,6 +856,33 @@ footer{background:var(--ink); color:#fff; padding:48px 22px 32px}
 .util-drop a{display:block;padding:6px 14px;font-size:12px;color:var(--ink);white-space:nowrap}
 .util-drop a:hover{color:var(--accent)}
 @media(max-width:768px){.utilnav{display:none}}
+.page-type{display:block;margin-top:8px;font-size:11px;font-weight:400;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.55)}
+.wf{margin-bottom:32px}
+.wf-card-wire{display:block;width:70%;margin:0}
+.wf-cta{display:flex;align-items:center;gap:20px;padding:24px;background:var(--card);border:1px dashed var(--line);border-radius:10px}
+.wf-cta .wire{flex:1;margin:0}
+.wf-button{display:inline-block;padding:10px 18px;border-radius:6px;background:var(--accent);color:#fff;font-size:13px;white-space:nowrap;align-self:flex-start}
+.wf-filters{display:flex;flex-wrap:wrap;gap:10px}
+.wf-input{display:inline-block;min-width:160px;padding:9px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--muted);font-size:12px}
+.wf-count{color:var(--muted);font-size:12px;margin:0 0 4px}
+.wf-rows{list-style:none;padding:0;margin:0}
+.wf-rows li{padding:14px 0;border-bottom:1px solid var(--line)}
+.wf-rows .wire{height:10px;margin:8px 0 0;width:85%}
+.wf-rows .wf-row-title{height:14px;width:45%;margin:0}
+.wf-pager{display:flex;gap:6px;font-size:12px;color:var(--muted)}
+.wf-pager span{padding:6px 10px;border:1px solid var(--line);border-radius:6px}
+.wf-pager .current{background:var(--ink);color:#fff;border-color:var(--ink)}
+.wf-links{columns:2;column-gap:32px;padding-left:18px;margin:0}
+.wf-links li{margin-bottom:10px;break-inside:avoid}
+.wf-cols{display:grid;grid-template-columns:1fr 220px;gap:32px;align-items:start}
+.wf-cols .content{border-top:0;padding-top:0}
+.wf-aside{border-left:1px dashed var(--line);padding-left:20px}
+.wf-aside a{display:block;font-size:13px;margin-bottom:8px}
+.wf-form{display:flex;flex-direction:column;gap:16px;max-width:520px}
+.wf-field{display:flex;flex-direction:column;gap:6px}
+.wf-field .wire{width:120px;height:10px;margin:0}
+.wf-field .wf-input{min-width:0;height:38px}
+@media(max-width:768px){.wf-cols{grid-template-columns:1fr}.wf-aside{border-left:0;padding-left:0}.wf-links{columns:1}}
 """
 
 
