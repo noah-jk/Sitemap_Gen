@@ -180,15 +180,16 @@ export SITEMAP_DATA_DIR=./data SITEMAP_INSECURE_COOKIES=1   # plain http on loca
 ```
 
 Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS. The
-compose file needs two variables: `LAN_IP` (the server's LAN address; the app
-listens only there) and `PROXY_IP` (the address Nginx Proxy Manager connects
-from, as shown in the app's request log).
+compose file needs one variable, `LAN_IP`: the server's LAN address, so the
+app listens only there. `PROXY_IP` (the address Nginx Proxy Manager connects
+from, as shown in the app's request log) is optional; without it, failed-login
+limits count for all visitors together.
 
 - **Portainer:** Stacks → Add stack → Repository, point it at this repo and
-  `compose.yaml`, and set `LAN_IP` and `PROXY_IP` under Environment variables.
-  Create the first login from the container's Console:
+  `compose.yaml`, and set `LAN_IP` under Environment variables. Create the
+  first login from the container's Console:
   `python -m app.manage create-user noah`.
-- **Command line:** put the two variables in a `.env` file next to
+- **Command line:** put `LAN_IP=...` in a `.env` file next to
   `compose.yaml`, then `docker compose up -d --build` and
   `docker compose exec app python -m app.manage create-user noah`.
 
