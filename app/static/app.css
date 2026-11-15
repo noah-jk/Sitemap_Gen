@@ -63,3 +63,38 @@ table.plain th, table.plain td { text-align: left; padding: 6px 8px; border-bott
   .topbar { gap: 10px; padding: 6px 16px; }
   .logout { margin-left: 0; }
 }
+
+select, button { font: inherit; }
+select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); }
+button:not(.primary):not(.link):not(.badge) { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); color: var(--ink); cursor: pointer; }
+button.link { background: none; border: 0; padding: 0 2px; color: var(--accent); cursor: pointer; text-decoration: underline; }
+label.inline { flex-direction: row; align-items: center; gap: 6px; font-weight: 600; }
+label.check { flex-direction: row; align-items: center; gap: 6px; font-weight: 400; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 4px 0 8px; }
+.toolbar #grid-status { color: var(--muted); }
+.bulk-bar { border-top: 1px solid var(--line); padding-top: 8px; font-size: 13px; }
+.badge { background: var(--error); color: #fff; border: 0; border-radius: 999px; padding: 3px 10px; font-weight: 700;
+  cursor: pointer; font-size: 12px; }
+.problem-flag { display: inline-block; width: 18px; height: 18px; line-height: 18px; border-radius: 50%;
+  background: var(--error); color: #fff; font-weight: 700; font-size: 12px; text-align: center; cursor: help; }
+.target .muted { font-size: 12px; }
+.row.end { justify-content: flex-end; }
+
+dialog { border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: min(560px, calc(100vw - 32px));
+  background: var(--card); color: var(--ink); }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog h2 { margin-bottom: 2px; }
+dialog form { display: flex; flex-direction: column; gap: 12px; }
+dialog fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+dialog fieldset[hidden] { display: none; }
+dialog legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+dialog p { margin: 0; }
+.results, .chosen-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; }
+.results li button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+  border-radius: 0; background: none; color: var(--ink); padding: 6px 4px; cursor: pointer; }
+.results li button:hover, .results li button:focus { background: var(--paper); }
+.results li.muted { padding: 6px 4px; font-size: 13px; }
+.chosen-list li { padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.chosen { font-size: 14px; }

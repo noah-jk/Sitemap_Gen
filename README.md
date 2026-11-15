@@ -170,6 +170,18 @@ content audit: import the crawl, then filter, sort, and set Recommendation / Fin
 Decision / notes in a grid. Each client project is its own SQLite file under
 the data folder.
 
+In the grid, choosing **combine** or **split** opens a picker for the page(s)
+the content goes to. Rules are checked on every save: a combine or split needs
+a target, a target can't be a page that's being removed, and a split needs two
+or more pages including its redirect. Removing a page that others point at is
+allowed, and those pages show up in the **Problems** view. Bulk edits apply to
+the selected rows or to every page matching the current filters. Filters and
+sort can be saved as named views.
+
+The **Exports** tab has the redirect map (only pages with a Final Decision;
+old redirects that would chain through a removed page are re-pointed), the
+content audit CSV, and a Markdown sitemap that `sitemap2proto.py` can read.
+
 Run locally:
 
 ```sh

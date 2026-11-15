@@ -333,6 +333,15 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 return JSONResponse({"detail": str(e)}, status_code=400)
         return {"count": count, "warning": warning}
 
+    @app.get("/api/p/{slug}/pages/{page_id}/content-targets")
+    def content_targets(request: Request, slug: str, page_id: int):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            rows = conn.execute(
+                "SELECT p.id, p.label, p.url_path FROM page_content_targets c JOIN pages p ON p.id = c.target_id "
+                "WHERE c.page_id = ? ORDER BY p.label", (page_id,)).fetchall()
+        return [dict(r) for r in rows]
+
     @app.get("/api/p/{slug}/targets")
     def targets(request: Request, slug: str, q: str = "", exclude: Optional[int] = None):
         require_user(request)
