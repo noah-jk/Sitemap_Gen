@@ -36,12 +36,33 @@ def verify_password(password: str, stored: str) -> bool:
 _DUMMY_HASH = hash_password(secrets.token_hex(16))
 
 
-def create_user(store: Store, username: str, password: str) -> None:
+def _check_password(password: str) -> None:
     if len(password) < 12:
         raise ValueError("password must be at least 12 characters")
+
+
+def create_user(store: Store, username: str, password: str) -> None:
+    _check_password(password)
     with closing(store.registry()) as reg:
+        if reg.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+            raise ValueError(f"user {username} already exists; use set-password to change the password")
         reg.execute("INSERT INTO users(username, password_hash, created_at) VALUES (?,?,?)",
                     (username, hash_password(password), now_ms()))
+
+
+def set_password(store: Store, username: str, password: str) -> None:
+    """Change a password. Browsers logged in before the change are logged out."""
+    _check_password(password)
+    with closing(store.registry()) as reg:
+        cur = reg.execute("UPDATE users SET password_hash = ?, password_changed_at = ? WHERE username = ?",
+                          (hash_password(password), now_ms(), username))
+    if cur.rowcount == 0:
+        raise ValueError(f"no user called {username}")
+
+
+def list_usernames(store: Store) -> list:
+    with closing(store.registry()) as reg:
+        return [r["username"] for r in reg.execute("SELECT username FROM users ORDER BY username")]
 
 
 def authenticate(store: Store, username: str, password: str) -> Optional[int]:
@@ -53,9 +74,11 @@ def authenticate(store: Store, username: str, password: str) -> Optional[int]:
     return row["id"] if verify_password(password, row["password_hash"]) else None
 
 
-def user_exists(store: Store, user_id: int) -> bool:
+def session_valid(store: Store, user_id: int, logged_in_at: int) -> bool:
+    """The user still exists and hasn't changed their password since this login."""
     with closing(store.registry()) as reg:
-        return reg.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is not None
+        row = reg.execute("SELECT password_changed_at FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row is not None and logged_in_at >= row["password_changed_at"]
 
 
 class LoginLimiter:

@@ -176,3 +176,25 @@ def test_edit_saves_and_detects_conflicts(imported):
     assert patch("notes", "x", r.json()["updated_at"], tok="forged").status_code == 403
     cleared = patch("decision", None, r.json()["updated_at"])
     assert cleared.status_code == 200 and cleared.json()["decision"] is None
+
+
+def test_password_change_logs_out_old_sessions(logged_in, tmp_path):
+    from app.db import Store
+    assert logged_in.get("/", follow_redirects=False).status_code == 200
+    auth.set_password(Store(str(tmp_path / "data")), "noah", "a brand new password")
+    assert logged_in.get("/", follow_redirects=False).status_code == 303
+    assert login(logged_in).status_code == 401
+    assert login(logged_in, "a brand new password").status_code == 303
+
+
+def test_user_management_errors(tmp_path):
+    from app.db import Store
+    store = Store(str(tmp_path / "d"))
+    auth.create_user(store, "noah", PASSWORD)
+    with pytest.raises(ValueError, match="already exists"):
+        auth.create_user(store, "noah", PASSWORD)
+    with pytest.raises(ValueError, match="no user"):
+        auth.set_password(store, "ghost", PASSWORD)
+    with pytest.raises(ValueError, match="12 characters"):
+        auth.set_password(store, "noah", "short")
+    assert auth.list_usernames(store) == ["noah"]

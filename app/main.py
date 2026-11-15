@@ -91,7 +91,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
 
     def require_user(request: Request) -> int:
         uid = request.session.get("uid")
-        if not uid or not auth.user_exists(store, uid):
+        if not uid or not auth.session_valid(store, uid, request.session.get("login_at", 0)):
             request.session.pop("uid", None)
             raise NotLoggedIn()
         return uid
@@ -128,7 +128,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             return render(request, "login.html", status_code=401, error="Wrong username or password.")
         limiter.reset(client)
         request.session.clear()
-        request.session.update(uid=uid, csrf=secrets.token_urlsafe(32))
+        request.session.update(uid=uid, login_at=now_ms(), csrf=secrets.token_urlsafe(32))
         return RedirectResponse("/", status_code=303)
 
     @app.post("/logout")
