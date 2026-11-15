@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Exports · {{ project }}{% endblock %}
+{% block content %}
+<h1>Exports</h1>
+
+<section class="card">
+  <h2>Redirect map</h2>
+  <p class="muted small">Every page with a Final Decision of combine, split, or delete-with-a-target, as old URL → new URL.
+    Old redirects that would now chain through a removed page are re-pointed straight to the final page.
+    Rows that only have a Recommendation aren't included until there's a Final Decision.</p>
+  {% if not rmap.ok %}
+  <p class="error" role="alert">{{ rmap.blocking|length }} page{{ "s" if rmap.blocking|length != 1 }} with a Final Decision
+    break a rule, so the redirect map can't be exported yet.</p>
+  <ul>
+    {% for id, msg in rmap.blocking.items() %}{% if loop.index <= 10 %}
+    <li><strong>{{ rmap.blocking_labels[id] }}</strong>: {{ msg }}</li>
+    {% endif %}{% endfor %}
+  </ul>
+  <p><a href="/p/{{ slug }}/pages?view=problems">Fix them in the Problems view</a></p>
+  {% else %}
+  <dl class="stats">
+    <div><dt>Redirects</dt><dd>{{ rmap.rows|length }}</dd></div>
+    <div><dt>Deleted, will 404</dt><dd>{{ rmap.will_404 }}</dd></div>
+    <div><dt>Recommended, undecided</dt><dd>{{ rmap.undecided }}</dd></div>
+  </dl>
+  <p><a class="button primary" href="/p/{{ slug }}/exports/redirect-map.csv" download>Download redirect map (CSV)</a></p>
+  {% endif %}
+  {% if rmap.undecided %}
+  <p class="small"><a href="/p/{{ slug }}/pages?view=undecided">See the {{ rmap.undecided }} undecided page{{ "s" if rmap.undecided != 1 }}</a></p>
+  {% endif %}
+  {% if rmap.unresolved %}
+  <h3>Will end on a 404</h3>
+  <ul class="small">{% for line in rmap.unresolved %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Content audit</h2>
+  <p class="muted small">Every page with Recommendation, Final Decision, Notes, targets, and the crawl and GA4 columns.
+    Columns that are empty for every page are left out. Opens in Excel or Google Sheets.</p>
+  <p>{{ counts.pages }} pages · {{ counts.recommended or 0 }} with a recommendation · {{ counts.decided or 0 }} decided</p>
+  <p><a class="button primary" href="/p/{{ slug }}/exports/content-audit.csv" download>Download content audit (CSV)</a></p>
+</section>
+
+<section class="card">
+  <h2>Markdown sitemap</h2>
+  <p class="muted small">The pages being kept, nested by their position in the tree, in the format
+    <code>sitemap2proto.py</code> reads. News and calendar collections are left out.</p>
+  <p><a class="button primary" href="/p/{{ slug }}/exports/sitemap.md" download>Download sitemap (Markdown)</a></p>
+</section>
+{% endblock %}

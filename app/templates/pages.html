@@ -7,8 +7,60 @@
 {% if count == 0 %}
 <section class="card"><p>No pages yet. <a href="/p/{{ slug }}/import">Import a crawl</a> to get started.</p></section>
 {% else %}
-<div class="grid-bar"><span id="grid-status" role="status" aria-live="polite"></span></div>
+<div class="toolbar">
+  <label class="inline">View
+    <select id="view-select"><option value="">All pages</option></select>
+  </label>
+  <button type="button" id="save-view">Save view</button>
+  <button type="button" id="delete-view" hidden>Delete view</button>
+  <button type="button" id="problem-badge" class="badge" hidden></button>
+  <span id="grid-status" role="status" aria-live="polite"></span>
+</div>
+<div class="toolbar bulk-bar">
+  <span id="bulk-count">Select rows with the checkboxes, or</span>
+  <label class="check"><input type="checkbox" id="bulk-all"> use all <span id="bulk-total">matching</span> <span id="bulk-noun">pages</span></label>
+  <label class="inline">Set
+    <select id="bulk-field">
+      <option value="recommendation">Recommendation</option>
+      <option value="decision">Final Decision</option>
+      <option value="status">Status</option>
+    </select>
+  </label>
+  <label class="inline">to <select id="bulk-value"></select></label>
+  <button type="button" class="primary" id="bulk-apply">Apply</button>
+</div>
 <div id="grid"></div>
+
+<dialog id="target-dialog" aria-labelledby="td-title">
+  <form id="td-form">
+    <h2 id="td-title"></h2>
+    <p class="muted small" id="td-path"></p>
+    <div class="row" id="td-dispositions">
+      <label>Recommendation <select id="td-reco"></select></label>
+      <label>Final Decision <select id="td-decision"></select></label>
+    </div>
+    <fieldset id="td-redirect-set">
+      <legend>Redirect to</legend>
+      <div id="td-redirect-chosen" class="chosen"></div>
+      <input type="search" id="td-redirect-search" placeholder="Search pages by name or path" autocomplete="off"
+             aria-label="Search for the page to redirect to">
+      <ul id="td-redirect-results" class="results"></ul>
+    </fieldset>
+    <fieldset id="td-content-set">
+      <legend>Content goes to</legend>
+      <p class="muted small">A split needs two or more pages. The redirect target is added automatically.</p>
+      <ul id="td-content-chosen" class="chosen-list"></ul>
+      <input type="search" id="td-content-search" placeholder="Search pages to add" autocomplete="off"
+             aria-label="Search for pages that receive content">
+      <ul id="td-content-results" class="results"></ul>
+    </fieldset>
+    <p class="error" id="td-error" role="alert"></p>
+    <div class="row end">
+      <button type="button" id="td-cancel">Cancel</button>
+      <button type="submit" class="primary" id="td-save">Save</button>
+    </div>
+  </form>
+</dialog>
 <script src="/static/vendor/tabulator.min.js"></script>
 <script src="/static/pages.js"></script>
 {% endif %}

@@ -116,7 +116,7 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 | traffic columns | GA4 sessions, views, engaged sessions, engagement rate, key events; Search Console clicks/impressions if connected. Optional. |
 | duplicate columns | Near-duplicate count and closest match, when Crawl Analysis ran. Optional. |
 | `crawl_extra` | JSON of every unmapped crawl column. |
-| `recommendation` | KWALL's recommended disposition: `keep` / `delete` / `review` / `combine` / `split` (`CHECK` constraint). Exported as "KWALL Reco". |
+| `recommendation` | Our recommended disposition: `keep` / `delete` / `review` / `combine` / `split` (`CHECK` constraint). Exported as "Recommendation". |
 | `decision` | The client's final disposition, same values. Empty until decided. Exported as "Final Decision". |
 | `redirect_to` | Foreign key to one row: where the old URL sends visitors. |
 | `status` | `todo` / `done`. Implementation progress at launch, kept separate from the decision. |
@@ -142,7 +142,7 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 
 ### How each disposition uses the links
 
-"Disposition" below means the effective value: `decision` when set, otherwise `recommendation`. Keeping both preserves what KWALL recommended when the client overrides it.
+"Disposition" below means the effective value: `decision` when set, otherwise `recommendation`. Keeping both preserves what we recommended when the client overrides it.
 
 | Disposition | `redirect_to` | content targets | Meaning |
 |---|---|---|---|
@@ -218,7 +218,7 @@ Checked against a full "Internal: All" export of whittier.edu on Nov 15, 2026: 3
 ### E. Exports
 - **Prototype zip**, built in memory, for manual S3 upload: `robots.txt` disallowing everything, `noindex` meta tags, filename with project and version (`clientname-sitemap-v3.zip`). No AWS credentials on the homelab.
 - **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved, including chains through `existing_redirects`. Host-level rules (bare host → `www`) are one line, not one per page.
-- **Content audit** as CSV for the client, in the same layout as the current hand-groomed sheet: Address, KWALL Reco, Final Decision, Notes, then the crawl and GA4 columns, with empty columns dropped. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
+- **Content audit** as CSV for the client, in the same layout as the current hand-groomed sheet: Address, Recommendation, Final Decision, Notes, then the crawl and GA4 columns, with empty columns dropped. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
 - **Markdown sitemap**, for the existing CLI.
 
 ### F. Tree testing (self-built, isolated)

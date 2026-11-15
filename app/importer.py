@@ -94,7 +94,7 @@ def _coerce(col: str, v: str):
     return v.strip()
 
 
-def _host_aliases(host: str) -> set:
+def host_aliases(host: str) -> set:
     bare = host[4:] if host.startswith("www.") else host
     return {bare, "www." + bare}
 
@@ -180,7 +180,7 @@ def import_crawl(conn: sqlite3.Connection, lines: Iterable[str], filename: str,
         canonical = next((h for h in tied if h.startswith("www.")), tied[0])
     else:
         canonical = ""
-    aliases = _host_aliases(canonical) if canonical else set()
+    aliases = host_aliases(canonical) if canonical else set()
     s.canonical_host = canonical
     s.title_suffix = settings["title_suffix"] or detect_title_suffix(
         r.get("Title 1", "") for r in html_rows if r["Status Code"] == "200")

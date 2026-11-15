@@ -166,31 +166,60 @@ sp.write_dir(files, "prototype")                           # or: zip_bytes = sp.
 ## Web app (content audit)
 
 `app/` is a self-hosted web app for working a Screaming Frog crawl into a
-content audit: import the crawl, then filter, sort, and set KWALL Reco / Final
+content audit: import the crawl, then filter, sort, and set Recommendation / Final
 Decision / notes in a grid. Each client project is its own SQLite file under
 the data folder.
+
+In the grid, choosing **combine** or **split** opens a picker for the page(s)
+the content goes to. Rules are checked on every save: a combine or split needs
+a target, a target can't be a page that's being removed, and a split needs two
+or more pages including its redirect. Removing a page that others point at is
+allowed, and those pages show up in the **Problems** view. Bulk edits apply to
+the selected rows or to every page matching the current filters. Filters and
+sort can be saved as named views.
+
+The **Exports** tab has the redirect map (only pages with a Final Decision;
+old redirects that would chain through a removed page are re-pointed), the
+content audit CSV, and a Markdown sitemap that `sitemap2proto.py` can read.
 
 Run locally:
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-export SITEMAP_DATA_DIR=./data SITEMAP_INSECURE_COOKIES=1   # plain http on localhost only
+export SITEMAP_DATA_DIR=./data
 .venv/bin/python -m app.manage create-user noah
 .venv/bin/uvicorn app.main:create_app --factory --port 8000
 ```
 
-Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS:
+Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS. The
+compose file needs one variable, `LAN_IP`: the server's LAN address, so the
+app listens only there. `HOST_PORT` changes the port (default 8080). `PROXY_IP` (the address Nginx Proxy Manager connects
+from, as shown in the app's request log) is optional; without it, failed-login
+limits count for all visitors together.
 
-```sh
-printf 'LAN_IP=192.168.1.50\nPROXY_IP=192.168.1.10\n' > .env   # your addresses
-docker compose up -d --build
-docker compose exec app python -m app.manage create-user noah
-```
+A GitHub Action tests every push and publishes the image to
+`ghcr.io/noah-jk/sitemap_gen`: `latest` from `main`, plus a tag per branch
+(slashes become hyphens) and per commit. The server only pulls it; nothing is
+built there.
+
+- **Portainer:** Stacks → Add stack, paste `compose.yaml` into the Web editor
+  (or use Repository mode), and set `LAN_IP` under Environment variables. To
+  run a branch build, also set `IMAGE_TAG` to the branch tag. Update with
+  **Pull and redeploy**. Create the first login from the container's Console:
+  `python -m app.manage create-user noah`.
+- **Command line:** put `LAN_IP=...` in a `.env` file next to
+  `compose.yaml`, then `docker compose pull && docker compose up -d` and
+  `docker compose exec app python -m app.manage create-user noah`.
+
+Plain `http` works. If the app is only ever reached over HTTPS, set
+`SITEMAP_SECURE_COOKIES=1` so the login cookie is never sent over plain
+http. Data lives in the `sitemap_data` volume.
 
 Admin commands (`python -m app.manage ...`): `create-user NAME`, `migrate`,
 and `backup DEST_DIR`, which writes consistent copies of every database and
-is safe while the app is running. Run the backup nightly from cron, e.g.
-`docker compose exec -T app python -m app.manage backup /data/backups`.
+is safe while the app is running. Run the backup nightly from the host's cron,
+e.g. `docker exec <container> python -m app.manage backup /data/backups`, and
+copy `/data/backups` off the volume as part of your normal backups.
 
 Import the **"Internal: All"** export as CSV. The importer keeps HTML pages only,
 merges `www`/bare-host/`http`/trailing-slash variants into one page, sums GA4

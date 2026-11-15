@@ -23,3 +23,6 @@ data/
 backups/
 # Synthetic test data only, never real crawls
 !tests/fixtures/*.csv
+
+# Local deploy settings
+.env

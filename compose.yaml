@@ -1,12 +1,20 @@
 services:
   app:
-    build: .
+    # Built and published by .github/workflows/image.yml. IMAGE_TAG picks a branch build;
+    # leave it unset for `latest` (the main branch).
+    image: ghcr.io/noah-jk/sitemap_gen:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      # Publish on the LAN address only, never 0.0.0.0. Set LAN_IP in a .env file next to this one.
-      - "${LAN_IP:?set LAN_IP in .env}:8080:8000"
+      # Publish on the LAN address only, never 0.0.0.0. Set LAN_IP (and HOST_PORT if 8080 is taken)
+      # in .env or in Portainer's stack variables.
+      - "${LAN_IP:?set LAN_IP}:${HOST_PORT:-8080}:8000"
     environment:
-      # Nginx Proxy Manager's address, so the app trusts its X-Forwarded-For header.
-      FORWARDED_ALLOW_IPS: "${PROXY_IP:?set PROXY_IP in .env}"
+      # Optional: Nginx Proxy Manager's address, so failed-login limits count per visitor
+      # instead of for everyone together. Safe to leave unset.
+      FORWARDED_ALLOW_IPS: "${PROXY_IP:-127.0.0.1}"
     volumes:
-      - ./data:/data
+      # Named volume: Docker copies the image's /data ownership, so the non-root app user can write.
+      - sitemap_data:/data
+
+volumes:
+  sitemap_data:
