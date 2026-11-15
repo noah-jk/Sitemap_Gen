@@ -173,7 +173,7 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
   - HTML 200s become `pages` rows.
   - 3xx rows go into `existing_redirects` (source, target, type), not `pages`.
   - 4xx/5xx rows become pages with disposition `review` and a reason.
-  - PDFs and other files become rows with `page_type = document`, kept out of the tree but in the audit.
+  - PDFs, CSS, images, and other non-HTML files are dropped. This is an IA tool, so only HTML pages are in scope. The import summary reports how many rows were skipped and why.
 - **Normalization and variant merging:** Screaming Frog often lists `https://whittier.edu`, `https://www.whittier.edu`, and `https://www.whittier.edu/` as separate rows. The importer reduces every address to a normalized key (one canonical host per project, trailing slash stripped except on the root, fragments dropped, query strings sorted or stripped by rule) and merges rows that share a key into one page:
   - The 200 response on the canonical host supplies the crawl data.
   - Variants that redirect are recorded in `existing_redirects`.
@@ -246,7 +246,6 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
 - Is the prototype internal-only or client-presentable?
 - Is the Octopus-style page-thumbnail look essential, or is a clean tree enough?
 - Existing S3 bucket and CloudFront setup for client prototypes?
-- Do PDFs and other documents belong in the client audit, or only HTML pages?
 - A domain on Cloudflare for the tunnel (needed by phase 5).
 - When the coworker joins, do they need their own login only, or also per-project permissions?
 
