@@ -20,13 +20,16 @@ The renderer never knows the input was Markdown. Swap in a CSV parser later
 and stages 2 and 3 don't change a line. That separation is the whole point.
 """
 
+import io
 import os
 import re
 import html
 import json
 import shutil
+import zipfile
 import argparse
 import functools
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -34,7 +37,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # --------------------------------------------------------------------------
 # MODEL  - the intermediate representation everything else agrees on
 # --------------------------------------------------------------------------
-@dataclass
+@dataclass(eq=False)
 class Node:
     title: str
     parent: "Node | None" = None
@@ -42,6 +45,8 @@ class Node:
     slug: str = ""        # url-safe name for this page's folder
     out_path: str = ""    # where this page's index.html lands, relative to output root
     is_button: bool = False  # render as a button in the global nav
+    id: Optional[int] = None  # stable identity when the tree comes from a database
+    page_type: str = ""
 
 @dataclass
 class FooterColumn:
@@ -52,6 +57,36 @@ class FooterColumn:
 class UtilityNavItem:
     label: str
     children: List[str] = field(default_factory=list)
+
+@dataclass
+class LinkGroup:
+    """A footer column or utility-nav item with its links resolved to pages.
+    `node` is the page the group label itself links to (None for footer headers)."""
+    label: str
+    node: Optional[Node]
+    links: List[Node] = field(default_factory=list)
+
+@dataclass(frozen=True)
+class Settings:
+    nav_style: str = "grid"
+    dropdown_depth: int = 0
+    mega_menu: bool = False
+    sticky_header: bool = False
+
+    def __post_init__(self) -> None:
+        if self.nav_style not in ("grid", "sidebar"):
+            raise ValueError(f"nav_style must be 'grid' or 'sidebar', not {self.nav_style!r}")
+        if self.dropdown_depth < 0:
+            raise ValueError("dropdown_depth must be 0 or more")
+        if self.mega_menu and self.dropdown_depth > 0:
+            raise ValueError("mega_menu and dropdown_depth are mutually exclusive")
+
+@dataclass
+class Site:
+    root: Node
+    footer: List[LinkGroup] = field(default_factory=list)
+    utility: List[LinkGroup] = field(default_factory=list)
+    standalone: List[Node] = field(default_factory=list)  # footer/utility-only pages, not in the nav tree
 
 
 def _tree_to_dict(node: Node) -> Dict[str, object]:
@@ -101,39 +136,26 @@ def parse_markdown(text: str) -> Node:
     return root
 
 
-def parse_utility_nav(text: str) -> List[UtilityNavItem]:
-    items: List[UtilityNavItem] = []
+def _parse_two_level_list(text: str) -> List[Tuple[str, List[str]]]:
+    """Top-level bullets become group labels; any deeper bullet is a link in the current group."""
+    groups: List[Tuple[str, List[str]]] = []
     for raw in text.splitlines():
         m = LIST_LINE.match(raw)
         if not m:
             continue
-        indent = len(m.group(1).expandtabs(4))
         title = m.group(2).strip()
-        if indent == 0:
-            items.append(UtilityNavItem(label=title))
-        elif items:
-            items[-1].children.append(title)
-    return items
+        if len(m.group(1).expandtabs(4)) == 0:
+            groups.append((title, []))
+        elif groups:
+            groups[-1][1].append(title)
+    return groups
+
+def parse_utility_nav(text: str) -> List[UtilityNavItem]:
+    return [UtilityNavItem(label, links) for label, links in _parse_two_level_list(text)]
 
 def parse_footer(text: str) -> List[FooterColumn]:
-    """
-    Parse the already-extracted footer block (text after the ## Footer heading).
-    Returns up to 4 FooterColumns; top-level items are column headers, children are links.
-    """
-    columns: list[FooterColumn] = []
-    for raw in text.splitlines():
-        m = LIST_LINE.match(raw)
-        if not m:
-            continue
-        indent = len(m.group(1).expandtabs(4))
-        title = m.group(2).strip()
-        if indent == 0:
-            if len(columns) == 4:
-                break
-            columns.append(FooterColumn(label=title))
-        elif columns:
-            columns[-1].links.append(title)
-    return columns
+    """Up to 4 columns; top-level items are column headers, children are links."""
+    return [FooterColumn(label, links) for label, links in _parse_two_level_list(text)[:4]]
 
 
 # --------------------------------------------------------------------------
@@ -167,58 +189,50 @@ def assign_paths(root: Node) -> None:
 
 
 def build_title_index(root: Node) -> Dict[str, Node]:
-    """Flat map of title -> Node for resolving footer links."""
-    index: dict[str, Node] = {}
-    stack = list(root.children)
-    while stack:
-        n = stack.pop()
-        index[n.title] = n
-        stack.extend(n.children)
+    """
+    Title -> page, for footer and utility links written as titles in Markdown.
+    Titles can repeat ("Contact Us" in several sections), so the shallowest
+    page wins, then the earliest in the file.
+    """
+    index: Dict[str, Node] = {}
+    queue = deque(root.children)
+    while queue:
+        n = queue.popleft()
+        index.setdefault(n.title, n)
+        queue.extend(n.children)
     return index
 
-def resolve_utility_nav_nodes(util_items: List[UtilityNavItem], title_index: Dict[str, Node], root: Node) -> List[Node]:
+def resolve_links(
+    footer_cols: Sequence[FooterColumn], util_items: Sequence[UtilityNavItem], root: Node
+) -> Tuple[List[LinkGroup], List[LinkGroup], List[Node]]:
+    """
+    Turn footer and utility titles into page references. A title that isn't in
+    the sitemap gets a standalone page: a real URL that isn't in the global nav.
+    Must run after assign_paths so top-level slugs are known.
+    """
+    index = build_title_index(root)
     used_slugs = {c.slug for c in root.children}
-    extra: List[Node] = []
-    all_titles = (
-        [item.label for item in util_items]
-        + [child for item in util_items for child in item.children]
-    )
-    for lt in all_titles:
-        if lt in title_index:
-            continue
-        base = slugify(lt)
-        slug, n = base, 1
-        while slug in used_slugs:
-            n += 1
-            slug = f"{base}-{n}"
-        used_slugs.add(slug)
-        node = Node(title=lt, slug=slug, out_path=f"{slug}/index.html")
-        extra.append(node)
-        title_index[lt] = node
-    return extra
+    standalone: List[Node] = []
 
-def resolve_footer_nodes(footer_cols: List[FooterColumn], title_index: Dict[str, Node], root: Node) -> List[Node]:
-    """
-    For any footer link title not already in the sitemap, create a standalone
-    Node with its own page. These pages are reachable from the footer but do
-    not appear in the global nav.
-    """
-    used_slugs = {c.slug for c in root.children}
-    extra: list[Node] = []
-    for col in footer_cols:
-        for lt in col.links:
-            if lt in title_index:
-                continue
-            base = slugify(lt)
+    def page_for(title: str) -> Node:
+        node = index.get(title)
+        if node is None:
+            base = slugify(title)
             slug, n = base, 1
             while slug in used_slugs:
                 n += 1
                 slug = f"{base}-{n}"
             used_slugs.add(slug)
-            node = Node(title=lt, slug=slug, out_path=f"{slug}/index.html")
-            extra.append(node)
-            title_index[lt] = node
-    return extra
+            node = Node(title=title, slug=slug, out_path=f"{slug}/index.html")
+            index[title] = node
+            standalone.append(node)
+        return node
+
+    footer = [LinkGroup(c.label, None, [page_for(t) for t in c.links]) for c in footer_cols]
+    label_nodes = [page_for(item.label) for item in util_items]
+    utility = [LinkGroup(item.label, node, [page_for(t) for t in item.children])
+               for item, node in zip(util_items, label_nodes)]
+    return footer, utility, standalone
 
 
 # --------------------------------------------------------------------------
@@ -293,18 +307,19 @@ def nav_mega_panel(top_node: Node, here: str) -> str:
             cols.append(f'<div class="mega-col">{head}</div>')
     return f'<div class="mega-panel">{"".join(cols)}</div>'
 
-def _build_utility_nav_html(util_items: Sequence[UtilityNavItem], here: str, title_index: Dict[str, Node]) -> str:
-    if not util_items:
+def _href(here: str, node: Optional[Node]) -> str:
+    return esc(rel(here, node.out_path) if node is not None else "#")
+
+def _build_utility_nav_html(utility: Sequence[LinkGroup], here: str) -> str:
+    if not utility:
         return ""
     parts = []
-    for item in util_items:
-        href = esc(rel(here, n.out_path) if (n := title_index.get(item.label)) else "#")
+    for item in utility:
+        href = _href(here, item.node)
         link = f'<a href="{href}">{esc(item.label)}</a>'
-        if item.children:
+        if item.links:
             child_items = "".join(
-                f'<li><a href="{esc(rel(here, n.out_path) if (n := title_index.get(ct)) else "#")}">'
-                f'{esc(ct)}</a></li>'
-                for ct in item.children
+                f'<li><a href="{_href(here, n)}">{esc(n.title)}</a></li>' for n in item.links
             )
             parts.append(
                 f'<div class="util-item has-util-drop">{link}'
@@ -314,14 +329,12 @@ def _build_utility_nav_html(util_items: Sequence[UtilityNavItem], here: str, tit
             parts.append(f'<a class="util-item" href="{href}">{esc(item.label)}</a>')
     return f'<nav class="utilnav">{"".join(parts)}</nav>'
 
-def _build_footer_inner(footer_cols: Sequence[FooterColumn], here: str, title_index: Dict[str, Node]) -> str:
-    if footer_cols:
+def _build_footer_inner(footer: Sequence[LinkGroup], here: str) -> str:
+    if footer:
         col_htmls = []
-        for col in footer_cols:
+        for col in footer:
             items = "".join(
-                f'<li><a href="{esc(rel(here, n.out_path) if (n := title_index.get(lt)) else "#")}">'
-                f'{esc(lt)}</a></li>'
-                for lt in col.links
+                f'<li><a href="{_href(here, n)}">{esc(n.title)}</a></li>' for n in col.links
             )
             col_htmls.append(
                 f'<div class="footer-col"><h3>{esc(col.label)}</h3><ul>{items}</ul></div>'
@@ -338,8 +351,7 @@ def _build_mobile_nav(
     root: Node,
     here: str,
     section_of_node: Optional[Node],
-    util_items: Sequence[UtilityNavItem] = (),
-    title_index: Optional[Dict[str, Node]] = None,
+    utility: Sequence[LinkGroup] = (),
 ) -> str:
     mob_parts = []
     for c in root.children:
@@ -355,16 +367,15 @@ def _build_mobile_nav(
             mob_parts.append(f'<details{open_attr}><summary>{link}</summary>{children_html}</details>')
         else:
             mob_parts.append(link)
-    if util_items:
-        ti = title_index or {}
+    if utility:
         util_parts = []
-        for item in util_items:
-            href = esc(rel(here, n.out_path) if (n := ti.get(item.label)) else "#")
+        for item in utility:
+            href = _href(here, item.node)
             link = f'<a href="{href}">{esc(item.label)}</a>'
-            if item.children:
+            if item.links:
                 children_html = "".join(
-                    f'<div class="mob-util-child"><a href="{esc(rel(here, n.out_path) if (n := ti.get(ct)) else "#")}">{esc(ct)}</a></div>'
-                    for ct in item.children
+                    f'<div class="mob-util-child"><a href="{_href(here, n)}">{esc(n.title)}</a></div>'
+                    for n in item.links
                 )
                 util_parts.append(f'<details><summary>{link}</summary>{children_html}</details>')
             else:
@@ -395,35 +406,18 @@ def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], na
     layout_close = "</div>"                    if sidebar_html else ""
     return sidebar_html, children_block, layout_open, layout_close
 
-def _build_global_nav(root: Node, here: str, section_of_node: Optional[Node], mega_menu: bool, dropdown_depth: int) -> str:
-    if mega_menu:
-        nav_parts = []
-        for c in root.children:
-            classes = _nav_classes(c, section_of_node)
-            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-            if c.children:
-                panel = nav_mega_panel(c, here)
-                nav_parts.append(f'<div class="nav-item has-mega">{link}{panel}</div>')
-            else:
-                nav_parts.append(link)
-        return "".join(nav_parts)
-    elif dropdown_depth > 0:
-        nav_parts = []
-        for c in root.children:
-            classes = _nav_classes(c, section_of_node)
-            link = f'<a class="{classes}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-            if c.children:
-                sub = nav_dropdown(c.children, here, dropdown_depth)
-                nav_parts.append(f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>')
-            else:
-                nav_parts.append(link)
-        return "".join(nav_parts)
-    else:
-        return "".join(
-            f'<a class="{_nav_classes(c, section_of_node)}" '
-            f'href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
-            for c in root.children
-        )
+def _build_global_nav(root: Node, here: str, section_of_node: Optional[Node], settings: Settings) -> str:
+    nav_parts = []
+    for c in root.children:
+        link = f'<a class="{_nav_classes(c, section_of_node)}" href="{esc(rel(here, c.out_path))}">{esc(c.title)}</a>'
+        if c.children and settings.mega_menu:
+            nav_parts.append(f'<div class="nav-item has-mega">{link}{nav_mega_panel(c, here)}</div>')
+        elif c.children and settings.dropdown_depth > 0:
+            sub = nav_dropdown(c.children, here, settings.dropdown_depth)
+            nav_parts.append(f'<div class="nav-item has-dropdown">{link}<ul class="dropdown">{sub}</ul></div>')
+        else:
+            nav_parts.append(link)
+    return "".join(nav_parts)
 
 def _nav_classes(node: Node, active_node: Optional[Node]) -> str:
     return " ".join(filter(None, [
@@ -431,13 +425,13 @@ def _nav_classes(node: Node, active_node: Optional[Node]) -> str:
         "nav-btn" if node.is_button else "",
     ]))
 
-def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = (), title_index: Optional[Dict[str, Node]] = None, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False, util_items: Sequence[UtilityNavItem] = (), sticky_header: bool = False) -> str:
-    title_index = title_index if title_index is not None else {}
+def render_page(node: Node, site: Site, settings: Settings = Settings()) -> str:
+    root = site.root
     here = node.out_path
     css = rel(here, "style.css")
     home_link = rel(here, root.out_path)
-    utility_nav_html = _build_utility_nav_html(util_items, here, title_index)
-    sticky_cls     = " is-sticky" if sticky_header else ""
+    utility_nav_html = _build_utility_nav_html(site.utility, here)
+    sticky_cls     = " is-sticky" if settings.sticky_header else ""
     util_bar_open  = f'<div class="header-stack{sticky_cls}">' if utility_nav_html else ""
     util_bar_close = "</div>"                                   if utility_nav_html else ""
     topbar_cls     = f"topbar{sticky_cls}" if not utility_nav_html else "topbar"
@@ -445,9 +439,9 @@ def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = ()
 
     anc = ancestors(node)
     section_of_node = anc[1] if len(anc) > 1 else None
-    nav_items = _build_global_nav(root, here, section_of_node, mega_menu, dropdown_depth)
+    nav_items = _build_global_nav(root, here, section_of_node, settings)
 
-    mobile_nav_html = _build_mobile_nav(root, here, section_of_node, util_items, title_index)
+    mobile_nav_html = _build_mobile_nav(root, here, section_of_node, site.utility)
 
     # breadcrumb = the ancestor chain, last one not a link
     crumbs = anc
@@ -457,9 +451,9 @@ def render_page(node: Node, root: Node, footer_cols: Sequence[FooterColumn] = ()
         for c in crumbs
     )
 
-    sidebar_html, children_block, layout_open, layout_close = _build_children_block(node, root, here, anc, nav_style)
+    sidebar_html, children_block, layout_open, layout_close = _build_children_block(node, root, here, anc, settings.nav_style)
 
-    footer_inner = _build_footer_inner(footer_cols, here, title_index)
+    footer_inner = _build_footer_inner(site.footer, here)
 
     # deliberately low-fidelity placeholder body
     skeleton = (
@@ -986,51 +980,69 @@ def _extract_section(src: str, heading: str) -> Tuple[str, str]:
     return remaining, body
 
 
-def build(md_path: str, out_dir: str, nav_style: str = "grid", dropdown_depth: int = 0, mega_menu: bool = False, sticky_header: bool = False) -> int:
-    with open(md_path, encoding="utf-8") as f:
-        src = f.read()
-
-    src, footer_src = _extract_section(src, "Footer")
-    src, util_src   = _extract_section(src, "Utility Nav")
-    sitemap_src = src
-    root        = parse_markdown(sitemap_src)
-    footer_cols = parse_footer(footer_src)
-    util_items  = parse_utility_nav(util_src)
+def site_from_markdown(text: str) -> Site:
+    """PARSE + DERIVE for Markdown input. A database-backed caller builds the Site itself."""
+    text, footer_src = _extract_section(text, "Footer")
+    text, util_src   = _extract_section(text, "Utility Nav")
+    root = parse_markdown(text)
     assign_paths(root)
-    title_index  = build_title_index(root)
-    footer_only  = resolve_footer_nodes(footer_cols, title_index, root)
-    util_only    = resolve_utility_nav_nodes(util_items, title_index, root)
-    extra_nodes  = footer_only + util_only
+    footer, utility, standalone = resolve_links(parse_footer(footer_src), parse_utility_nav(util_src), root)
+    return Site(root=root, footer=footer, utility=utility, standalone=standalone)
 
-    if os.path.exists(out_dir):
-        shutil.rmtree(out_dir)
-    os.makedirs(out_dir)
 
-    with open(os.path.join(out_dir, "style.css"), "w", encoding="utf-8") as f:
-        f.write(STYLE)
-
-    count = 0
-    stack = [root]
+def all_pages(site: Site) -> List[Node]:
+    pages: List[Node] = []
+    stack = [site.root]
     while stack:
         node = stack.pop()
-        dest = os.path.join(out_dir, node.out_path)
-        os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
-        with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items, sticky_header))
-        count += 1
+        pages.append(node)
         stack.extend(node.children)
+    return pages + site.standalone
 
-    for node in extra_nodes:
-        dest = os.path.join(out_dir, node.out_path)
+
+def render_site(site: Site, settings: Settings = Settings()) -> Dict[str, str]:
+    """RENDER: every output file as {relative path: content}. Nothing touches disk."""
+    files = {"style.css": STYLE}
+    for node in all_pages(site):
+        files[node.out_path] = render_page(node, site, settings)
+    files["sitemap.html"] = render_visual_sitemap(site.root)
+    return files
+
+
+OUTPUT_MARKERS = ("style.css", "sitemap.html")
+
+def write_dir(files: Dict[str, str], out_dir: str) -> None:
+    """Replace out_dir with files. Refuses to wipe a non-empty folder that isn't a previous build."""
+    if os.path.exists(out_dir):
+        if os.listdir(out_dir) and not all(os.path.isfile(os.path.join(out_dir, m)) for m in OUTPUT_MARKERS):
+            raise FileExistsError(f"{out_dir} has other files in it; refusing to delete it")
+        shutil.rmtree(out_dir)
+    os.makedirs(out_dir)
+    for path, content in files.items():
+        dest = os.path.join(out_dir, path)
         os.makedirs(os.path.dirname(dest) or out_dir, exist_ok=True)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(render_page(node, root, footer_cols, title_index, nav_style, dropdown_depth, mega_menu, util_items, sticky_header))
-        count += 1
+            f.write(content)
 
-    with open(os.path.join(out_dir, "sitemap.html"), "w", encoding="utf-8") as f:
-        f.write(render_visual_sitemap(root))
 
-    return count
+def write_zip(files: Dict[str, str]) -> bytes:
+    """Zip in memory with fixed timestamps, so the same site always gives the same bytes."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(files):
+            info = zipfile.ZipInfo(path, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            zf.writestr(info, files[path])
+    return buf.getvalue()
+
+
+def build(md_path: str, out_dir: str, settings: Settings = Settings()) -> int:
+    """CLI entry point: Markdown file in, prototype folder out. Returns the page count."""
+    with open(md_path, encoding="utf-8") as f:
+        site = site_from_markdown(f.read())
+    write_dir(render_site(site, settings), out_dir)
+    return len(all_pages(site))
 
 
 def main() -> None:
@@ -1046,9 +1058,14 @@ def main() -> None:
     ap.add_argument("--sticky-header", action="store_true",
                     help="make the header stick to the top of the viewport on scroll")
     args = ap.parse_args()
-    if args.mega_menu and args.dropdown_depth > 0:
-        ap.error("--mega-menu and --dropdown-depth are mutually exclusive")
-    n = build(args.sitemap, args.out_dir, args.nav_style, args.dropdown_depth, args.mega_menu, args.sticky_header)
+    try:
+        settings = Settings(args.nav_style, args.dropdown_depth, args.mega_menu, args.sticky_header)
+    except ValueError as e:
+        ap.error(str(e))
+    try:
+        n = build(args.sitemap, args.out_dir, settings)
+    except FileExistsError as e:
+        ap.error(str(e))
     index = os.path.join(args.out_dir, "index.html")
     visual = os.path.join(args.out_dir, "sitemap.html")
     print(f"Built {n} pages -> {args.out_dir}/")
