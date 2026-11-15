@@ -161,7 +161,7 @@
       {title: "Sessions", field: "sessions", width: 96, hozAlign: "right", formatter: "money",
        formatterParams: {precision: 0, thousand: ","}, headerSortStartingDir: "desc"},
       {title: "Inlinks", field: "inlinks", width: 84, hozAlign: "right", headerSortStartingDir: "desc"},
-      {title: "In nav", field: "in_current_nav", width: 72, hozAlign: "center", formatter: "tickCross",
+      {title: "In current nav", field: "in_current_nav", width: 82, hozAlign: "center", formatter: "tickCross",
        formatterParams: {crossElement: false}},
       {title: "Collection", field: "collection", width: 104, formatter: "plaintext", headerFilter: "input"},
       {title: "Parent", field: "parent_label", formatter: "plaintext", headerFilter: "input", minWidth: 140},
@@ -392,7 +392,7 @@
         onDone: (added, menuName) => {
           table.deselectRow();
           $("bulk-all").checked = false;
-          status.textContent = `Added ${added} page${added === 1 ? "" : "s"} to the ${menuName}.`;
+          status.textContent = `Added ${added} entr${added === 1 ? "y" : "ies"} to the ${menuName}.`;
           table.setPage(table.getPage());
         }});
       return;

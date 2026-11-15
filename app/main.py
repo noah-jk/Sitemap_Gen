@@ -82,6 +82,11 @@ class NavAdd(BaseModel):
     parent_id: Optional[int] = None
     page_ids: List[int] = []
     match: Optional[Dict[str, Any]] = None
+    subpage_depth: int = 0
+
+
+class SubPages(BaseModel):
+    depth: int = 1
 
 
 class NavHeading(BaseModel):
@@ -500,8 +505,14 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 ids = grid.matching_ids(conn, filters, body.match.get("view"))
             if not ids:
                 raise rules.RuleError(["No pages chosen."])
-            return {"added": nav.add_pages(conn, body.menu, body.parent_id, ids)}
+            depth = max(0, min(body.subpage_depth, 3))
+            return {"added": nav.add_pages(conn, body.menu, body.parent_id, ids, depth)}
         return tree_write(request, slug, run)
+
+    @app.post("/api/p/{slug}/nav/{item_id}/subpages")
+    def nav_subpages(request: Request, slug: str, item_id: int, body: SubPages):
+        depth = max(1, min(body.depth, 3))
+        return tree_write(request, slug, lambda conn: {"added": nav.add_subpages(conn, item_id, depth)})
 
     @app.post("/api/p/{slug}/nav/headings")
     def nav_add_heading(request: Request, slug: str, body: NavHeading):

@@ -60,6 +60,13 @@
     add("↓", `Move ${item.display} down`, () => index < siblings.length - 1 &&
       act(send("POST", "/nav/move", {id: item.id, menu, parent_id: parentId, index: index + 1}), "Moved down."));
     add("Add pages…", `Add pages under ${item.display}`, () => openAdd(menu, item.id, item.display));
+    if (!item.heading) {
+      add("Pull in sub-pages", `Add ${item.display}'s sub-pages from the sitemap that aren't under it yet (including ones removed earlier)`,
+        () => act(send("POST", `/nav/${item.id}/subpages`, {depth: 1}), "").then((r) => {
+          if (r.ok) status.textContent = r.data.added ? `Added ${r.data.added} sub-page${r.data.added === 1 ? "" : "s"}.`
+            : "No sub-pages to add: they're all there already.";
+        }));
+    }
     if (menu === "main") add("Add heading", `Add a heading under ${item.display}`, () => addHeading(menu, item.id));
     add("Rename", `Rename ${item.display}`, () => rename(item));
     if (menu === "main" && parentId === null) {
@@ -149,6 +156,7 @@
     $("add-search").value = "";
     $("add-results").replaceChildren();
     $("add-error").textContent = "";
+    $("add-depth").value = "0";
     updateCount();
     dialog.showModal();
     $("add-search").focus();
@@ -178,10 +186,11 @@
   $("add-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!adding.chosen.size) { $("add-error").textContent = "Click pages in the results to choose them."; return; }
-    const r = await send("POST", "/nav/pages", {menu: adding.menu, parent_id: adding.parentId, page_ids: [...adding.chosen.keys()]});
+    const r = await send("POST", "/nav/pages", {menu: adding.menu, parent_id: adding.parentId,
+      page_ids: [...adding.chosen.keys()], subpage_depth: Number($("add-depth").value)});
     if (!r.ok) { $("add-error").textContent = r.data.detail || "That didn't work."; return; }
     dialog.close();
-    status.textContent = r.data.added ? `Added ${r.data.added} page${r.data.added === 1 ? "" : "s"}.` : "Those pages were already there.";
+    status.textContent = r.data.added ? `Added ${r.data.added} entr${r.data.added === 1 ? "y" : "ies"}.` : "Those pages were already there.";
     await load();
   });
 

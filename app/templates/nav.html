@@ -31,6 +31,16 @@
            aria-label="Search for pages to add">
     <ul id="add-results" class="results"></ul>
     <p class="muted small" id="add-count">Nothing chosen yet.</p>
+    <label>Include sub-pages
+      <select id="add-depth">
+        <option value="0">No, just these pages</option>
+        <option value="1">Yes, 1 level down</option>
+        <option value="2">Yes, 2 levels down</option>
+        <option value="3">Yes, 3 levels down</option>
+      </select>
+      <span class="muted small">Copies each page's children from the Sitemap tab, in the same order. Removed,
+        gone, and news or calendar pages are skipped, and nothing goes deeper than the menu allows.</span>
+    </label>
     <p class="error" id="add-error" role="alert"></p>
     <div class="row end">
       <button type="button" id="add-cancel">Cancel</button>

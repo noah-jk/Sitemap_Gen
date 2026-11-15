@@ -142,3 +142,34 @@ def test_stamp_changes_with_menus(conn):
     before = tree.stamp(conn)
     nav.add_heading(conn, "main", None, "X")
     assert tree.stamp(conn) != before
+
+
+def test_add_with_sub_pages_follows_the_sitemap(conn):
+    adm = pid(conn, "/admissions")
+    assert nav.add_pages(conn, "main", None, [adm], subpage_depth=1) == 3
+    assert labels(nav.load(conn)["main"]) == [("Admissions", ["Contact Us", "How to Apply"])]
+    assert nav.add_pages(conn, "main", None, [adm], subpage_depth=2) == 1   # only the new grandchild
+    assert labels(nav.load(conn)["main"]) == [("Admissions", ["Contact Us", ("How to Apply", ["First-Year Students"])])]
+
+
+def test_sub_pages_respect_menu_depth_and_skip_removed_pages(conn):
+    contact = pid(conn, "/admissions/contact")
+    ts = conn.execute("SELECT updated_at FROM pages WHERE id = ?", (contact,)).fetchone()[0]
+    rules.apply_changes(conn, contact, {"decision": "delete"}, ts)
+    assert nav.add_pages(conn, "footer", None, [pid(conn, "/admissions")], subpage_depth=3) == 2
+    assert labels(nav.load(conn)["footer"]) == [("Admissions", ["How to Apply"])]   # footer: 2 levels
+    assert nav.add_pages(conn, "main", None, [pid(conn, "/news")], subpage_depth=1) == 1  # news items left out
+
+
+def test_pull_in_new_sub_pages(conn):
+    adm = pid(conn, "/admissions")
+    nav.add_pages(conn, "main", None, [adm], subpage_depth=1)
+    entry = item_id(conn, "main", "Admissions")
+    nav.remove(conn, item_id(conn, "main", "Contact Us"))
+    tree.create_page(conn, "Visit Campus", adm)
+    assert nav.add_subpages(conn, entry) == 2        # the removed one comes back, plus the new page
+    assert labels(nav.load(conn)["main"]) == [("Admissions", ["How to Apply", "Contact Us", "Visit Campus"])]
+    assert nav.add_subpages(conn, entry) == 0
+    heading = nav.add_heading(conn, "main", None, "More")
+    with pytest.raises(rules.RuleError, match="Headings aren't pages"):
+        nav.add_subpages(conn, heading)

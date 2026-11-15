@@ -2,7 +2,7 @@
 window.MenuPicker = (function () {
   "use strict";
   const NAMES = {main: "Main menu", utility: "Utility nav", footer: "Footer"};
-  let dialog, form, title, menuSelect, parentSelect, error, opts;
+  let dialog, form, title, menuSelect, parentSelect, depthSelect, error, opts;
 
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -17,12 +17,16 @@ window.MenuPicker = (function () {
     title = el("h2", {id: "mp-title"});
     menuSelect = el("select", {id: "mp-menu"}, ...Object.entries(NAMES).map(([k, v]) => el("option", {value: k, text: v})));
     parentSelect = el("select", {id: "mp-parent"});
+    depthSelect = el("select", {id: "mp-depth"},
+      el("option", {value: "0", text: "No, just the page(s)"}), el("option", {value: "1", text: "Yes, 1 level down"}),
+      el("option", {value: "2", text: "Yes, 2 levels down"}), el("option", {value: "3", text: "Yes, 3 levels down"}));
     error = el("p", {class: "error", role: "alert"});
     const cancel = el("button", {type: "button", text: "Cancel"});
     form = el("form", {},
       title,
       el("label", {}, "Menu", menuSelect),
       el("label", {}, "Put it", parentSelect),
+      el("label", {}, "Include sub-pages from the sitemap", depthSelect),
       el("p", {class: "muted small", text: "Pages already in that spot are skipped. Rename entries in the Navigation tab."}),
       error,
       el("div", {class: "row end"}, cancel, el("button", {type: "submit", class: "primary", text: "Add"})));
@@ -46,7 +50,8 @@ window.MenuPicker = (function () {
 
   async function submit(e) {
     e.preventDefault();
-    const payload = Object.assign({menu: menuSelect.value, parent_id: parentSelect.value ? Number(parentSelect.value) : null}, opts.target);
+    const payload = Object.assign({menu: menuSelect.value, parent_id: parentSelect.value ? Number(parentSelect.value) : null,
+      subpage_depth: Number(depthSelect.value)}, opts.target);
     let resp;
     try {
       resp = await fetch(opts.api("/nav/pages"), {method: "POST",
@@ -68,6 +73,7 @@ window.MenuPicker = (function () {
       opts = o;
       title.textContent = o.title;
       error.textContent = "";
+      depthSelect.value = "0";
       await loadParents();
       dialog.showModal();
       menuSelect.focus();

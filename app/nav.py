@@ -130,8 +130,39 @@ def _tx(conn, fn):
 
 # ---- edits -------------------------------------------------------------------
 
-def add_pages(conn: sqlite3.Connection, menu: str, parent: Optional[int], page_ids: List[int]) -> int:
-    """Add pages to the end of a menu or under an entry. Pages already there are skipped."""
+def _children_map(conn) -> Dict[int, List[int]]:
+    """Kept sub-pages of each page in sitemap order (removed, gone, and collection pages left out)."""
+    from app import tree
+    return {node.id: [c.id for c in node.children] for node, _, _ in tree.walk(tree.load(conn))}
+
+
+def _pull(conn, item_id: int, menu: str, page_id: int, depth: int, kids: Dict[int, List[int]]) -> int:
+    """Copy the page's sitemap children under the entry, `depth` levels down, skipping ones already there."""
+    room = MAX_LEVELS[menu] - _level(conn, item_id)
+    depth = min(depth, room)
+    if depth <= 0:
+        return 0
+    existing = {r[0]: r[1] for r in conn.execute(
+        "SELECT page_id, id FROM nav_items WHERE parent_id = ? AND page_id IS NOT NULL", (item_id,))}
+    order = len(_siblings(conn, menu, item_id))
+    added = 0
+    for child in kids.get(page_id, []):
+        if child in existing:
+            child_item = existing[child]
+        else:
+            order += 1
+            child_item = conn.execute(
+                "INSERT INTO nav_items(menu, parent_id, page_id, sort_order, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (menu, item_id, child, order * 10, now_ms())).lastrowid
+            added += 1
+        added += _pull(conn, child_item, menu, child, depth - 1, kids)
+    return added
+
+
+def add_pages(conn: sqlite3.Connection, menu: str, parent: Optional[int], page_ids: List[int],
+              subpage_depth: int = 0) -> int:
+    """Add pages to the end of a menu or under an entry, optionally with their sitemap sub-pages
+    `subpage_depth` levels down. Pages already there are skipped. Returns entries added."""
     page_ids = list(dict.fromkeys(page_ids))
 
     def run() -> int:
@@ -150,7 +181,29 @@ def add_pages(conn: sqlite3.Connection, menu: str, parent: Optional[int], page_i
         conn.executemany(
             "INSERT INTO nav_items(menu, parent_id, page_id, sort_order, updated_at) VALUES (?, ?, ?, ?, ?)",
             [(menu, parent, p, (last + i + 1) * 10, now) for i, p in enumerate(new)])
-        return len(new)
+        added = len(new)
+        if subpage_depth > 0:
+            kids = _children_map(conn)
+            entries = {r[0]: r[1] for r in conn.execute(
+                "SELECT page_id, id FROM nav_items WHERE menu = ? AND parent_id IS ? AND page_id IS NOT NULL",
+                (menu, parent))}
+            for p in page_ids:
+                added += _pull(conn, entries[p], menu, p, subpage_depth, kids)
+        return added
+
+    return _tx(conn, run)
+
+
+def add_subpages(conn: sqlite3.Connection, item_id: int, depth: int = 1) -> int:
+    """Pull an entry's sitemap sub-pages in under it (new ones only). Returns entries added."""
+    def run() -> int:
+        item = _item(conn, item_id)
+        if item["page_id"] is None:
+            raise RuleError(["Headings aren't pages, so they have no sub-pages to pull in."])
+        if _level(conn, item_id) >= MAX_LEVELS[item["menu"]]:
+            raise RuleError([f"This entry is already at the deepest level the "
+                             f"{MENU_NAMES[item['menu']].lower()} allows."])
+        return _pull(conn, item_id, item["menu"], item["page_id"], depth, _children_map(conn))
 
     return _tx(conn, run)
 

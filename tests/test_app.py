@@ -413,3 +413,17 @@ def test_menu_views_and_tree_tags(imported):
     unplaced = imported.get("/api/p/example/pages", params={"view": "not_in_menu"}).json()
     paths = [r["url_path"] for r in unplaced["data"]]
     assert "/admissions" not in paths and "/" not in paths and "/gone" not in paths and "/news/story-two" not in paths
+
+
+def test_nav_sub_pages_routes(imported):
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    adm = page_by_path(imported, "/admissions")["id"]
+    r = imported.post("/api/p/example/nav/pages", json={"menu": "main", "page_ids": [adm], "subpage_depth": 9},
+                      headers=hdr)
+    assert r.json() == {"added": 4}                  # clamped to 3 levels; the sitemap only has 2 below
+    entry = imported.get("/api/p/example/nav").json()["menus"]["main"][0]
+    assert [c["display"] for c in entry["children"]] == ["Contact Us", "How to Apply"]
+    r = imported.post(f"/api/p/example/nav/{entry['id']}/subpages", json={"depth": 1}, headers=hdr)
+    assert r.json() == {"added": 0}
+    bad = imported.post(f"/api/p/example/nav/{entry['id']}/subpages", json={"depth": 1}, headers={"X-CSRF-Token": "x"})
+    assert bad.status_code == 403
