@@ -19,3 +19,5 @@ projects/
 
 # Local virtualenv
 .venv/
+data/
+backups/
