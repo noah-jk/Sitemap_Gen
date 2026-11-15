@@ -213,7 +213,7 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
 ### E. Exports
 - **Prototype zip**, built in memory, for manual S3 upload: `robots.txt` disallowing everything, `noindex` meta tags, filename with project and version (`clientname-sitemap-v3.zip`). No AWS credentials on the homelab.
 - **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved, including chains through `existing_redirects`.
-- **Content audit** as CSV or XLSX for the client, in the same layout as the current hand-groomed sheet: Address, KWALL Reco, Final Decision, Notes, then the crawl and GA4 columns, with empty columns dropped. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
+- **Content audit** as CSV for the client, in the same layout as the current hand-groomed sheet: Address, KWALL Reco, Final Decision, Notes, then the crawl and GA4 columns, with empty columns dropped. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
 - **Markdown sitemap**, for the existing CLI.
 
 ### F. Tree testing (self-built, isolated)
@@ -237,13 +237,15 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
 | 4 | Page types and layout wireframes | Prototype pages differ by type |
 | 5 | Isolated tree-test service behind a Cloudflare Tunnel | A client participant completes a test from outside the LAN, and the results land back in the project |
 
+## Not planned yet
+
+- **Importing client decisions back.** The client may fill in "Final Decision" in the exported CSV. Reading that sheet back and matching decisions by URL would save re-keying, but the CSV export is enough for a first deliverable. Revisit after the first real project.
+
 ## Open questions
 
 - Is the prototype internal-only or client-presentable?
 - Is the Octopus-style page-thumbnail look essential, or is a clean tree enough?
 - Existing S3 bucket and CloudFront setup for client prototypes?
-- Does the client fill in "Final Decision" in the spreadsheet itself? If so, the app needs to import decisions back from the returned sheet, matched by URL.
-- What values go in "KWALL Reco" and "Final Decision" today: the five dispositions, or other wording?
 - Do PDFs and other documents belong in the client audit, or only HTML pages?
 - A domain on Cloudflare for the tunnel (needed by phase 5).
 - When the coworker joins, do they need their own login only, or also per-project permissions?
