@@ -21,3 +21,5 @@ projects/
 .venv/
 data/
 backups/
+# Synthetic test data only, never real crawls
+!tests/fixtures/*.csv
