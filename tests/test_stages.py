@@ -142,7 +142,8 @@ def test_visual_sitemap_embeds_tree_json_safely():
     root = sp.parse_markdown("- </script><b>x\n")
     sp.assign_paths(root)
     html = sp.render_visual_sitemap(root)
-    assert html.count("</script>") == 2  # only the page's own closing tags
+    assert html.count("</script>") == 1  # only the page's own closing tag
+    assert "<b>x" not in html
 
 
 # ---- output ----------------------------------------------------------------
@@ -176,3 +177,23 @@ def test_write_dir_replaces_previous_build(tmp_path):
     sp.write_dir(sp.render_site(sp.site_from_markdown("- Old\n")), str(out))
     sp.write_dir(sp.render_site(sp.site_from_markdown("- New\n")), str(out))
     assert (out / "new/index.html").exists() and not (out / "old").exists()
+
+
+def test_noindex_marks_every_page_and_adds_robots_txt():
+    site = sp.site_from_markdown("- A\n")
+    plain = sp.render_site(site)
+    hidden = sp.render_site(site, sp.Settings(noindex=True))
+    assert "robots.txt" not in plain and 'name="robots"' not in plain["a/index.html"]
+    assert hidden["robots.txt"] == "User-agent: *\nDisallow: /\n"
+    for name in ("index.html", "a/index.html", "sitemap.html"):
+        assert '<meta name="robots" content="noindex, nofollow">' in hidden[name]
+
+
+def test_more_below_note_on_parent_page():
+    site = sp.site_from_markdown("- News\n  - Latest\n- Events\n")
+    news, events = site.root.children
+    news.more_below, events.more_below = 392, 1
+    files = sp.render_site(site)
+    assert "Plus 392 more pages below this one" in files[news.out_path]
+    assert "Plus 1 more page below this one" in files[events.out_path]
+    assert "Leaf page" not in files[events.out_path]

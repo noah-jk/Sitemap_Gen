@@ -47,6 +47,7 @@ class Node:
     is_button: bool = False  # render as a button in the global nav
     id: Optional[int] = None  # stable identity when the tree comes from a database
     page_type: str = ""
+    more_below: int = 0   # pages under this one left out of the prototype (collections, depth cap)
 
 @dataclass
 class FooterColumn:
@@ -72,6 +73,7 @@ class Settings:
     dropdown_depth: int = 0
     mega_menu: bool = False
     sticky_header: bool = False
+    noindex: bool = False  # robots meta on every page, for prototypes hosted publicly
 
     def __post_init__(self) -> None:
         if self.nav_style not in ("grid", "sidebar"):
@@ -385,6 +387,12 @@ def _build_mobile_nav(
         util_section = ""
     return f'<nav class="mob-nav">{"".join(mob_parts)}</nav>{util_section}'
 
+def _more_below(node: Node) -> str:
+    if not node.more_below:
+        return ""
+    n = node.more_below
+    return f'<div class="leaf"><p>Plus {n:,} more page{"s" if n != 1 else ""} below this one, not shown in the prototype.</p></div>'
+
 def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], nav_style: str) -> Tuple[str, str, str, str]:
     sidebar_html = ""
     if node is root:
@@ -399,7 +407,9 @@ def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], na
             f'<span class="card-arrow">&rarr;</span></a>'
             for c in node.children
         )
-        children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div></section>'
+        children_block = f'<section class="children"><h2>In this section</h2><div class="grid">{cards}</div>{_more_below(node)}</section>'
+    elif node.more_below:
+        children_block = f'<section class="children"><h2>In this section</h2>{_more_below(node)}</section>'
     else:
         children_block = '<section class="children leaf"><h2>Leaf page</h2><p>No sub-pages. This is a destination.</p></section>'
     layout_open  = '<div class="page-layout">' if sidebar_html else ""
@@ -466,7 +476,7 @@ def render_page(node: Node, site: Site, settings: Settings = Settings()) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">{ROBOTS_META if settings.noindex else ""}
 <title>{esc(node.title)} - prototype</title>
 <link rel="stylesheet" href="{esc(css)}">{header_h_style}
 </head>
@@ -958,8 +968,13 @@ render();
 """
 
 
-def render_visual_sitemap(root: Node) -> str:
-    return VISUAL_HTML.replace("__TREE_JSON__", json.dumps(_tree_to_dict(root), ensure_ascii=False))
+ROBOTS_META = '\n<meta name="robots" content="noindex, nofollow">'
+
+def render_visual_sitemap(root: Node, noindex: bool = False) -> str:
+    # "<" is escaped so a title like "</script>" can't end the script block it sits in.
+    tree_json = json.dumps(_tree_to_dict(root), ensure_ascii=False).replace("<", "\\u003c")
+    page = VISUAL_HTML.replace("__TREE_JSON__", tree_json)
+    return page.replace('<meta charset="utf-8">', '<meta charset="utf-8">' + ROBOTS_META, 1) if noindex else page
 
 
 # --------------------------------------------------------------------------
@@ -1005,7 +1020,9 @@ def render_site(site: Site, settings: Settings = Settings()) -> Dict[str, str]:
     files = {"style.css": STYLE}
     for node in all_pages(site):
         files[node.out_path] = render_page(node, site, settings)
-    files["sitemap.html"] = render_visual_sitemap(site.root)
+    files["sitemap.html"] = render_visual_sitemap(site.root, settings.noindex)
+    if settings.noindex:
+        files["robots.txt"] = "User-agent: *\nDisallow: /\n"
     return files
 
 
