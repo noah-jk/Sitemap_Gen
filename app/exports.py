@@ -35,7 +35,7 @@ def _csv(header: List[str], rows: List[list]) -> str:
 AUDIT_COLUMNS: List[Tuple[str, str]] = [
     ("Address", "current_url"), ("Recommendation", "recommendation"), ("Final Decision", "decision"),
     ("Notes", "notes"), ("Redirect To", "redirect_url"), ("Content Goes To", "content_urls"),
-    ("Status", "status"), ("Label", "label"), ("Title", "title"), ("H1", "h1"),
+    ("Status", "status"), ("Page Type", "type"), ("Label", "label"), ("Title", "title"), ("H1", "h1"),
     ("Meta Description", "meta_description"), ("HTTP Status", "status_code"), ("Crawl Depth", "crawl_depth"),
     ("Inlinks", "inlinks"), ("Unique Inlinks", "unique_inlinks"), ("% of Total", "pct_of_total"),
     ("In Current Nav", "in_nav"), ("Collection", "collection"), ("GA4 Sessions", "sessions"),
@@ -55,6 +55,9 @@ def content_audit_csv(conn) -> str:
         "(SELECT group_concat(COALESCE(x.current_url, x.label), '; ') FROM page_content_targets c "
         " JOIN pages x ON x.id = c.target_id WHERE c.page_id = p.id) AS content_urls "
         "FROM pages p LEFT JOIN pages t ON t.id = p.redirect_to ORDER BY p.is_new, p.url_path, p.label").fetchall()
+    from app import tree
+    resolved = {n.id: n.type for n, _, _ in tree.walk(tree.load(conn))}
+    rows = [dict(r, type=resolved.get(r["id"], r["page_type"])) for r in rows]
     extras = [json.loads(r["crawl_extra"] or "{}") for r in rows]
     extra_cols = list(dict.fromkeys(k for e in extras for k in e))
     header = [h for h, _ in AUDIT_COLUMNS] + extra_cols

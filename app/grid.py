@@ -11,13 +11,13 @@ FIELDS: Dict[str, str] = {
     "collection": "p.collection", "recommendation": "p.recommendation", "decision": "p.decision",
     "status": "p.status", "notes": "p.notes", "missing_from_crawl": "p.missing_from_crawl",
     "redirect_to": "p.redirect_to", "redirect_label": "t.label", "redirect_path": "t.url_path",
-    "parent_id": "p.parent_id", "parent_label": "pp.label", "is_new": "p.is_new",
+    "parent_id": "p.parent_id", "parent_label": "pp.label", "is_new": "p.is_new", "page_type": "p.page_type",
     "menus": "(SELECT group_concat(DISTINCT n.menu) FROM nav_items n WHERE n.page_id = p.id)",
     "content_targets": "(SELECT json_group_array(target_id) FROM page_content_targets WHERE page_id = p.id)",
     "problem": "pr.msg", "updated_at": "p.updated_at",
 }
 TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem", "menus"}
-EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl"}
+EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl", "page_type"}
 
 EFFECTIVE = "COALESCE(p.decision, p.recommendation)"
 KEPT = (f"COALESCE({EFFECTIVE}, '') NOT IN ('delete','combine','split') "
@@ -61,7 +61,7 @@ def where_clause(filters: List[dict], preset: Optional[str]) -> Tuple[str, list]
             args.append("%" + re.sub(r"([%_\\])", r"\\\1", value) + "%")
         elif field in EXACT_FILTERS:
             if value == "(blank)":
-                where.append(f"{FIELDS[field]} IS NULL")
+                where.append(f"COALESCE({FIELDS[field]}, '') = ''")
             else:
                 where.append(f"{FIELDS[field]} = ?")
                 args.append(value)

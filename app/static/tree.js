@@ -67,6 +67,10 @@
     if (node.is_new) label.append(el("span", {class: "tag", text: "new"}));
     const MENU_TAGS = {main: "main menu", utility: "utility", footer: "footer"};
     node.menus.forEach((m) => label.append(el("span", {class: "tag menu-tag", text: MENU_TAGS[m]})));
+    const TYPES = {landing: "Landing", listing: "Listing", list: "List", article: "Article", form: "Form"};
+    label.append(el("span", {class: "tag", title: node.page_type ? "Page type (set in the Pages grid)" :
+      "Page type worked out from the sitemap; set it in the Pages grid to override",
+      text: TYPES[node.type] + (node.page_type ? "" : " (auto)")}));
 
     const actions = el("span", {class: "tree-actions"});
     const add = (text, title, fn) => {

@@ -460,3 +460,21 @@ def test_prototype_builds_in_background_once_per_burst(tmp_path, monkeypatch):
         [t.start() for t in threads]
         [t.join() for t in threads]
         assert results == [200, 200, 200] and len(builds) == 1   # served from the finished build
+
+
+def test_page_types_in_grid_bulk_and_audit(imported):
+    patch = patcher(imported, grid_csrf(imported))
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    campus = page_by_path(imported, "/campus-life")
+    assert patch(campus, page_type="form").json()["row"]["page_type"] == "form"
+    assert patch(page_by_path(imported, "/campus-life"), page_type="blog").status_code == 400
+    auto = imported.get("/api/p/example/pages", params={"filter[0][field]": "page_type", "filter[0][value]": "(blank)"}).json()
+    assert auto["last_row"] == 14
+    r = imported.post("/api/p/example/pages/bulk", headers=hdr,
+                      json={"match": {"filters": [{"field": "url_path", "value": "/admissions"}]}, "changes": {"page_type": "list"}})
+    assert r.json()["count"] == 4
+    audit = imported.get("/p/example/exports/content-audit.csv").text
+    rows = {line.split(",")[0]: line for line in audit.splitlines()[1:]}
+    assert ",list," in rows["https://www.example.edu/admissions"]
+    assert ",form," in rows["https://www.example.edu/campus-life"]
+    assert ",listing," in rows["https://www.example.edu/news"]          # auto, worked out from the sitemap

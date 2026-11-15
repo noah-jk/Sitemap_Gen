@@ -195,6 +195,14 @@ aren't in any menu still exist, like landing pages. The grid's "In the current
 navigation but not in a new menu" view checks that nothing was dropped by
 accident.
 
+Every page has a **page type**: Landing, Listing (a filterable index like news
+or events), List (a page of links), Article, or Form. Types start as **Auto**,
+worked out from the sitemap (news or calendar items below → Listing, other
+sub-pages → Landing, form-like titles → Form, otherwise Article), and can be
+set in the grid's Page type column or in bulk. Each type gets its own
+wireframe in the prototype, built from blocks (hero, cards, filters, item
+rows, fields…), and the type is in the content audit.
+
 The **Prototype** tab builds the clickable prototype from the sitemap (pages
 and URLs) and the menus, with menu style and depth settings, and previews it
 in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has

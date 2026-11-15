@@ -108,6 +108,7 @@
   // ---- grid ------------------------------------------------------------------
 
   const choices = [""].concat(DISPOSITIONS);
+  const TYPE_CHOICES = {"": "Auto", landing: "Landing", listing: "Listing", list: "List", article: "Article", form: "Form"};
   const filterChoices = {"": "", "(blank)": "(blank)"};
   DISPOSITIONS.forEach((c) => { filterChoices[c] = c; });
 
@@ -166,6 +167,10 @@
       {title: "Collection", field: "collection", width: 104, formatter: "plaintext", headerFilter: "input"},
       {title: "Parent", field: "parent_label", formatter: "plaintext", headerFilter: "input", minWidth: 140},
       {title: "Menus", field: "menus", formatter: "plaintext", headerFilter: "input", width: 110},
+      {title: "Page type", field: "page_type", width: 110, editor: "list", editorParams: {values: TYPE_CHOICES},
+       formatter: (cell) => cell.getValue() ? TYPE_CHOICES[cell.getValue()] : el("span", {class: "muted", text: "Auto"}),
+       headerFilter: "list", headerFilterParams: {values: Object.assign({"": "", "(blank)": "Auto"},
+         Object.fromEntries(Object.entries(TYPE_CHOICES).filter(([k]) => k)))}, headerFilterFunc: "="},
       disposition("Recommendation", "recommendation"),
       disposition("Final Decision", "decision"),
       {title: "Redirect to", field: "redirect_label", formatter: redirectFormatter, headerFilter: "input",
@@ -357,9 +362,10 @@
     const field = $("bulk-field").value;
     const values = field === "status" ? ["todo", "done"]
       : field === "parent_id" ? ["pick", "top"] : field === "menu" ? ["add"]
+      : field === "page_type" ? Object.keys(TYPE_CHOICES)
       : ["", "keep", "delete", "review", "combine"];
-    const names = {"": "(clear)", combine: "combine into…", pick: "a page I choose…", top: "the top level",
-      add: "a menu I choose…"};
+    const names = Object.assign({"": "(clear)", combine: "combine into…", pick: "a page I choose…",
+      top: "the top level", add: "a menu I choose…"}, field === "page_type" ? TYPE_CHOICES : {});
     bulkValue.replaceChildren(...values.map((v) => el("option", {value: v, text: names[v] || v})));
   }
   $("bulk-field").addEventListener("change", fillBulkValues);

@@ -1,5 +1,6 @@
 """The to-be navigation: kept pages nested by parent_id, edits to it, and prototypes built from it."""
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -9,6 +10,7 @@ from app.db import now_ms
 from app.rules import REMOVED, RuleError, check_parent
 
 MAX_LABEL = 200
+FORM_LABEL = re.compile(r"^(apply now|request|register|rsvp|sign up|contact us)\b|\b(form|inquiry)$", re.I)
 
 
 @dataclass
@@ -26,8 +28,22 @@ class TreeNode:
     descendants: int = 0        # every page below, collections included
     absorbs: int = 0            # pages combining or splitting into this one
 
+    @property
+    def type(self) -> str:
+        """The page type: set explicitly, or worked out from where the page sits in the sitemap."""
+        if self.page_type in sp.PAGE_TYPES:
+            return self.page_type
+        if self.collection_count:
+            return "listing"
+        if self.children:
+            return "landing"
+        if FORM_LABEL.search(self.label):
+            return "form"
+        return "article"
+
     def to_dict(self) -> dict:
         return {"id": self.id, "label": self.label, "url_path": self.url_path, "is_new": self.is_new,
+                "page_type": self.page_type, "type": self.type,
                 "is_button": self.is_button, "disposition": self.disposition, "updated_at": self.updated_at,
                 "collection_count": self.collection_count, "descendants": self.descendants,
                 "absorbs": self.absorbs, "children": [c.to_dict() for c in self.children]}
@@ -176,7 +192,7 @@ def build_site(conn: sqlite3.Connection) -> Tuple[sp.Site, sp.Settings]:
     pages: Dict[int, sp.Node] = {}
 
     def convert(node: TreeNode, parent: sp.Node, depth: int) -> None:
-        out = sp.Node(title=node.label, parent=parent, id=node.id, page_type=node.page_type,
+        out = sp.Node(title=node.label, parent=parent, id=node.id, page_type=node.type,
                       more_below=node.collection_count)
         parent.children.append(out)
         pages[node.id] = out
