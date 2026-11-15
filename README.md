@@ -181,7 +181,7 @@ export SITEMAP_DATA_DIR=./data SITEMAP_INSECURE_COOKIES=1   # plain http on loca
 
 Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS. The
 compose file needs one variable, `LAN_IP`: the server's LAN address, so the
-app listens only there. `PROXY_IP` (the address Nginx Proxy Manager connects
+app listens only there. `HOST_PORT` changes the port (default 8080). `PROXY_IP` (the address Nginx Proxy Manager connects
 from, as shown in the app's request log) is optional; without it, failed-login
 limits count for all visitors together.
 
