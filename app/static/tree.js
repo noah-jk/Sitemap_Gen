@@ -65,7 +65,8 @@
     if (node.absorbs) meta.push(`absorbs ${node.absorbs}`);
     const label = el("span", {class: "tree-label"}, el("span", {text: node.label}));
     if (node.is_new) label.append(el("span", {class: "tag", text: "new"}));
-    if (node.is_button) label.append(el("span", {class: "tag", text: "button"}));
+    const MENU_TAGS = {main: "main menu", utility: "utility", footer: "footer"};
+    node.menus.forEach((m) => label.append(el("span", {class: "tag menu-tag", text: MENU_TAGS[m]})));
 
     const actions = el("span", {class: "tree-actions"});
     const add = (text, title, fn) => {
@@ -80,10 +81,12 @@
     add("Move…", `Move ${node.label} under another page`, () => openMove(node));
     add("Add sub-page", `Add a page under ${node.label}`, () => addPage(node.id));
     add("Rename", `Rename ${node.label}`, () => rename(node));
-    if (node.parentId === null) {
-      add(node.is_button ? "Unmake button" : "Make button", "Show as a button in the main navigation",
-        () => patch(node, {is_button: !node.is_button}, node.is_button ? "No longer a button." : "Now a nav button."));
-    }
+    add("Add to menu…", `Add ${node.label} to a menu`, () => MenuPicker.open({
+      api, csrf, title: `Add “${node.label}” to a menu`, target: {page_ids: [node.id]},
+      onDone: (added, menuName) => {
+        status.textContent = added ? `Added to the ${menuName}.` : `Already in that spot in the ${menuName}.`;
+        load();
+      }}));
     if (node.is_new) add("Remove", `Remove ${node.label}`, () => removePage(node));
 
     const row = el("div", {class: "tree-row"},

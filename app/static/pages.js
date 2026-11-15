@@ -143,7 +143,7 @@
     ajaxResponse(url, params, resp) {
       lastTotal = resp.last_row;
       const plural = resp.last_row === 1 ? "page" : "pages";
-      status.textContent = `${resp.last_row.toLocaleString()} ${plural}`;
+      $("grid-count").textContent = `${resp.last_row.toLocaleString()} ${plural}`;
       $("bulk-total").textContent = resp.last_row.toLocaleString();
       $("bulk-noun").textContent = plural;
       const badge = $("problem-badge");
@@ -165,6 +165,7 @@
        formatterParams: {crossElement: false}},
       {title: "Collection", field: "collection", width: 104, formatter: "plaintext", headerFilter: "input"},
       {title: "Parent", field: "parent_label", formatter: "plaintext", headerFilter: "input", minWidth: 140},
+      {title: "Menus", field: "menus", formatter: "plaintext", headerFilter: "input", width: 110},
       disposition("Recommendation", "recommendation"),
       disposition("Final Decision", "decision"),
       {title: "Redirect to", field: "redirect_label", formatter: redirectFormatter, headerFilter: "input",
@@ -355,8 +356,10 @@
   function fillBulkValues() {
     const field = $("bulk-field").value;
     const values = field === "status" ? ["todo", "done"]
-      : field === "parent_id" ? ["pick", "top"] : ["", "keep", "delete", "review", "combine"];
-    const names = {"": "(clear)", combine: "combine into…", pick: "a page I choose…", top: "the top level"};
+      : field === "parent_id" ? ["pick", "top"] : field === "menu" ? ["add"]
+      : ["", "keep", "delete", "review", "combine"];
+    const names = {"": "(clear)", combine: "combine into…", pick: "a page I choose…", top: "the top level",
+      add: "a menu I choose…"};
     bulkValue.replaceChildren(...values.map((v) => el("option", {value: v, text: names[v] || v})));
   }
   $("bulk-field").addEventListener("change", fillBulkValues);
@@ -384,6 +387,16 @@
     };
 
     const pages = `${count.toLocaleString()} page${count === 1 ? "" : "s"}`;
+    if (field === "menu") {
+      MenuPicker.open({api, csrf, title: `Add ${pages} to a menu`, target,
+        onDone: (added, menuName) => {
+          table.deselectRow();
+          $("bulk-all").checked = false;
+          status.textContent = `Added ${added} page${added === 1 ? "" : "s"} to the ${menuName}.`;
+          table.setPage(table.getPage());
+        }});
+      return;
+    }
     if (field === "parent_id" && value === "pick") {
       openDialog({mode: "bulk", title: `Move ${pages} under…`,
         hint: "Pick the page they should sit under in the new navigation. Their sub-pages move with them.",

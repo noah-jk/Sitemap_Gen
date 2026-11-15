@@ -12,13 +12,16 @@ FIELDS: Dict[str, str] = {
     "status": "p.status", "notes": "p.notes", "missing_from_crawl": "p.missing_from_crawl",
     "redirect_to": "p.redirect_to", "redirect_label": "t.label", "redirect_path": "t.url_path",
     "parent_id": "p.parent_id", "parent_label": "pp.label", "is_new": "p.is_new",
+    "menus": "(SELECT group_concat(DISTINCT n.menu) FROM nav_items n WHERE n.page_id = p.id)",
     "content_targets": "(SELECT json_group_array(target_id) FROM page_content_targets WHERE page_id = p.id)",
     "problem": "pr.msg", "updated_at": "p.updated_at",
 }
-TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem"}
+TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem", "menus"}
 EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl"}
 
 EFFECTIVE = "COALESCE(p.decision, p.recommendation)"
+KEPT = (f"COALESCE({EFFECTIVE}, '') NOT IN ('delete','combine','split') "
+        f"AND (p.status_code IS NULL OR p.status_code < 400) AND p.url_path IS NOT '/'")
 PRESETS: Dict[str, Tuple[str, str]] = {
     "problems": ("Problems", "pr.msg IS NOT NULL"),
     "undecided": ("Recommended but undecided", "p.recommendation IS NOT NULL AND p.decision IS NULL"),
@@ -28,6 +31,9 @@ PRESETS: Dict[str, Tuple[str, str]] = {
     "gone_visited": ("404/403 but still visited", "p.status_code >= 400 AND p.sessions > 0"),
     "no_traffic": ("No traffic", "p.status_code = 200 AND p.sessions = 0"),
     "current_nav": ("In the current navigation", "p.in_current_nav = 1"),
+    "nav_dropped": ("In the current navigation but not in a new menu",
+                    f"p.in_current_nav = 1 AND NOT EXISTS (SELECT 1 FROM nav_items n WHERE n.page_id = p.id) AND {KEPT}"),
+    "not_in_menu": ("Kept but not in any menu", f"NOT EXISTS (SELECT 1 FROM nav_items n WHERE n.page_id = p.id) AND {KEPT} AND p.collection = ''"),
     "missing": ("Missing from the latest crawl", "p.missing_from_crawl = 1"),
 }
 

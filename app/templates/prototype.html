@@ -4,14 +4,16 @@
 {% block content %}
 <aside class="proto-settings card">
   <h1>Prototype</h1>
-  <p class="muted small">Built from the Tree tab: {{ pages }} pages. Every page carries a "noindex" tag, and the
+  <p class="muted small">Built from the Sitemap tab: {{ pages }} pages. Every page carries a "noindex" tag, and the
     download includes a <code>robots.txt</code> that blocks search engines.</p>
   <p><a class="button primary" href="/p/{{ slug }}/prototype/download" download>Download {{ slug }}-sitemap-{{ settings.version_label }}.zip</a></p>
   <p class="small"><a href="{{ preview }}" target="_blank" rel="noopener">Open the preview in a new tab</a>
     <span class="muted">(link works for 12 hours)</span></p>
-  {% if top_level > 12 %}<p class="warn small">The tree has {{ top_level }} top-level pages, and every page's menu lists all
-    of them. Group them under a few sections in the <a href="/p/{{ slug }}/tree">Tree tab</a>; the prototype gets
-    faster to build and much smaller to download.</p>{% endif %}
+  {% if not menu_counts.main %}<p class="warn small">The main menu is empty, so the prototype has no menu yet.
+    Add pages to it in the <a href="/p/{{ slug }}/nav">Navigation tab</a>.</p>
+  {% else %}<p class="small muted">Menus come from the <a href="/p/{{ slug }}/nav">Navigation tab</a>:
+    {{ menu_counts.main }} main, {{ menu_counts.utility }} utility, {{ menu_counts.footer }} footer
+    top-level entr{{ "y" if menu_counts.footer == 1 else "ies" }}.</p>{% endif %}
   {% if saved %}<p class="ok" role="status">Settings saved.</p>{% endif %}
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/p/{{ slug }}/prototype/settings" class="stack">
@@ -40,14 +42,6 @@
       <span class="muted small">Deeper pages become a "plus N more pages" note.</span>
     </label>
     <label>Version label <input name="version_label" value="{{ settings.version_label }}" maxlength="20" pattern="[A-Za-z0-9._\-]+"></label>
-    <label>Utility nav
-      <textarea name="utility_md" rows="5" spellcheck="false" placeholder="- Apply&#10;- Give&#10;- Login">{{ settings.utility_md }}</textarea>
-      <span class="muted small">A bullet list. Indent an item to put it in a dropdown.</span>
-    </label>
-    <label>Footer
-      <textarea name="footer_md" rows="8" spellcheck="false" placeholder="- About&#10;  - Contact Us&#10;  - Accessibility">{{ settings.footer_md }}</textarea>
-      <span class="muted small">Up to 4 columns: top-level bullets are headings, indented ones are links. Names that match a page link to it.</span>
-    </label>
     <button type="submit" class="primary">Save and rebuild</button>
   </form>
 </aside>

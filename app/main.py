@@ -24,7 +24,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 
 import sitemap2proto as sp
-from app import auth, config, exports, grid, importer, rules, tree
+from app import auth, config, exports, grid, importer, nav, rules, tree
 from app.db import DISPOSITIONS, SLUG_RE, Store, now_ms
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +75,31 @@ class Move(BaseModel):
 class NewPage(BaseModel):
     label: str
     parent_id: Optional[int] = None
+
+
+class NavAdd(BaseModel):
+    menu: str
+    parent_id: Optional[int] = None
+    page_ids: List[int] = []
+    match: Optional[Dict[str, Any]] = None
+
+
+class NavHeading(BaseModel):
+    menu: str
+    parent_id: Optional[int] = None
+    label: str
+
+
+class NavMove(BaseModel):
+    id: int
+    menu: str
+    parent_id: Optional[int] = None
+    index: int = 0
+
+
+class NavEdit(BaseModel):
+    label: Optional[str] = None
+    is_button: Optional[bool] = None
 
 
 def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None) -> FastAPI:
@@ -418,8 +443,15 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     def tree_api(request: Request, slug: str):
         require_user(request)
         with closing(open_project(slug)) as conn:
-            roots = tree.load(conn)
-        return {"roots": [r.to_dict() for r in roots]}
+            roots = [r.to_dict() for r in tree.load(conn)]
+            menus = nav.page_menus(conn)
+
+        def tag(nodes):
+            for n in nodes:
+                n["menus"] = menus.get(n["id"], [])
+                tag(n["children"])
+        tag(roots)
+        return {"roots": roots}
 
     def tree_write(request: Request, slug: str, action):
         require_user(request)
@@ -444,6 +476,51 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     def tree_delete(request: Request, slug: str, page_id: int):
         return tree_write(request, slug, lambda conn: tree.delete_new_page(conn, page_id) or {"ok": True})
 
+    # ---- navigation (menus) ------------------------------------------------
+
+    @app.get("/p/{slug}/nav", response_class=HTMLResponse)
+    def nav_view(request: Request, slug: str):
+        require_user(request)
+        open_project(slug).close()
+        return render(request, "nav.html", slug=slug, project=project_name(slug), tab="nav",
+                      menus=[(m, nav.MENU_NAMES[m], nav.MAX_LEVELS[m]) for m in nav.MENUS])
+
+    @app.get("/api/p/{slug}/nav")
+    def nav_api(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            return {"menus": nav.load(conn)}
+
+    @app.post("/api/p/{slug}/nav/pages")
+    def nav_add_pages(request: Request, slug: str, body: NavAdd):
+        def run(conn):
+            ids = body.page_ids
+            if body.match is not None:
+                filters = [f for f in body.match.get("filters", []) if isinstance(f, dict)]
+                ids = grid.matching_ids(conn, filters, body.match.get("view"))
+            if not ids:
+                raise rules.RuleError(["No pages chosen."])
+            return {"added": nav.add_pages(conn, body.menu, body.parent_id, ids)}
+        return tree_write(request, slug, run)
+
+    @app.post("/api/p/{slug}/nav/headings")
+    def nav_add_heading(request: Request, slug: str, body: NavHeading):
+        return tree_write(request, slug, lambda conn: {"id": nav.add_heading(conn, body.menu, body.parent_id, body.label)})
+
+    @app.post("/api/p/{slug}/nav/move")
+    def nav_move(request: Request, slug: str, body: NavMove):
+        return tree_write(request, slug,
+                          lambda conn: nav.move(conn, body.id, body.menu, body.parent_id, body.index) or {"ok": True})
+
+    @app.patch("/api/p/{slug}/nav/{item_id}")
+    def nav_edit(request: Request, slug: str, item_id: int, body: NavEdit):
+        return tree_write(request, slug,
+                          lambda conn: nav.update(conn, item_id, body.label, body.is_button) or {"ok": True})
+
+    @app.delete("/api/p/{slug}/nav/{item_id}")
+    def nav_remove(request: Request, slug: str, item_id: int):
+        return tree_write(request, slug, lambda conn: nav.remove(conn, item_id) or {"ok": True})
+
     # ---- prototype ---------------------------------------------------------
 
     def prototype_files(slug: str, conn) -> Dict[str, str]:
@@ -464,18 +541,17 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             settings = tree.settings_row(conn)
             files = prototype_files(slug, conn)
             pages = sum(1 for name in files if name.endswith(".html")) - 1
-            top_level = len(tree.load(conn))
+            menu_counts = {m: len(items) for m, items in nav.load(conn).items()}
         token = preview_signer.dumps(slug)
         return render(request, "prototype.html", slug=slug, project=project_name(slug), tab="prototype",
-                      settings=settings, preview=f"/preview/{token}/index.html", pages=pages, top_level=top_level,
+                      settings=settings, preview=f"/preview/{token}/index.html", pages=pages, menu_counts=menu_counts,
                       saved=bool(saved), error=error[:300])
 
     @app.post("/p/{slug}/prototype/settings")
     def prototype_settings(request: Request, slug: str, nav_style: str = Form("grid"),
                            menu: str = Form("flat"), dropdown_depth: int = Form(2),
                            sticky_header: str = Form(""), max_depth: int = Form(0),
-                           version_label: str = Form("v1"), footer_md: str = Form(""),
-                           utility_md: str = Form(""), csrf: str = Form("")):
+                           version_label: str = Form("v1"), csrf: str = Form("")):
         require_user(request)
         check_csrf(request, csrf)
         mega = menu == "mega"
@@ -488,9 +564,8 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         with closing(open_project(slug)) as conn:
             conn.execute(
                 "UPDATE settings SET nav_style = ?, dropdown_depth = ?, mega_menu = ?, sticky_header = ?, "
-                "max_depth = ?, version_label = ?, footer_md = ?, utility_md = ?",
-                (nav_style, depth, int(mega), int(bool(sticky_header)), max(0, min(max_depth, 10)), version,
-                 footer_md[:20000], utility_md[:20000]))
+                "max_depth = ?, version_label = ?",
+                (nav_style, depth, int(mega), int(bool(sticky_header)), max(0, min(max_depth, 10)), version))
         return RedirectResponse(f"/p/{slug}/prototype?saved=1", status_code=303)
 
     @app.get("/p/{slug}/prototype/download")

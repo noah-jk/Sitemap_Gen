@@ -1,11 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Tree · {{ project }}{% endblock %}
+{% block title %}Sitemap · {{ project }}{% endblock %}
 {% block body_attrs %} data-slug="{{ slug }}" data-csrf="{{ csrf }}"{% endblock %}
 {% block main_class %}content wide{% endblock %}
 {% block content %}
 <div class="tree-head">
-  <h1>Navigation tree</h1>
-  <p class="muted small">The pages being kept, nested as they'll be in the new site. Drag the ⠿ handle to reorder or
+  <h1>Sitemap</h1>
+  <p class="muted small">The sitemap: every page being kept, nested as it will be in the new site. Menus are
+    separate (see the Navigation tab); tags show which menus a page is in, and <strong>Add to menu…</strong> puts it in one. Drag the ⠿ handle to reorder or
     move a page (its sub-pages go with it), or use <strong>Move…</strong>. Open a page with ▸ to drop pages into it.
     Removed pages are left out and their sub-pages move up; news and calendar items are counted on their parent.</p>
   <div class="toolbar">
@@ -32,5 +33,6 @@
   </form>
 </dialog>
 <script src="/static/vendor/Sortable.min.js"></script>
+<script src="/static/menu-picker.js"></script>
 <script src="/static/tree.js"></script>
 {% endblock %}

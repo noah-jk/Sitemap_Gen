@@ -328,7 +328,7 @@ def test_tree_routes(imported):
     assert imported.post("/api/p/example/tree/move", json={"id": new_id}, headers={"X-CSRF-Token": "x"}).status_code == 403
     assert imported.delete(f"/api/p/example/tree/pages/{admissions['id']}", headers=hdr).status_code == 400
     assert imported.delete(f"/api/p/example/tree/pages/{new_id}", headers=hdr).status_code == 200
-    assert "Tree" in imported.get("/p/example/tree").text
+    assert "<h1>Sitemap</h1>" in imported.get("/p/example/tree").text
 
 
 def test_bulk_move_under_a_page(imported):
@@ -362,9 +362,13 @@ def test_prototype_preview_settings_and_zip(imported, tmp_path):
     token = csrf_from(html)
     r = imported.post("/p/example/prototype/settings", data={
         "csrf": token, "menu": "mega", "nav_style": "sidebar", "max_depth": "1", "version_label": "v3 final!",
-        "footer_md": "- Help\n  - Contact Us\n", "utility_md": "- Apply now\n", "sticky_header": "1"},
-        follow_redirects=False)
+        "sticky_header": "1"}, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].endswith("saved=1")
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    apply_id = page_by_path(imported, "/news")["id"]  # top level, so it is built even with depth 1
+    imported.post("/api/p/example/nav/pages", json={"menu": "utility", "page_ids": [apply_id]}, headers=hdr)
+    entry = imported.get("/api/p/example/nav").json()["menus"]["utility"][0]
+    imported.patch(f"/api/p/example/nav/{entry['id']}", json={"label": "Apply now"}, headers=hdr)
     page = imported.get(preview).text
     assert "is-sticky" in page and "Apply now" in page and "Plus 3 more pages" in imported.get(
         preview.replace("index.html", "admissions/index.html")).text
@@ -372,3 +376,40 @@ def test_prototype_preview_settings_and_zip(imported, tmp_path):
     assert z.headers["content-disposition"] == 'attachment; filename="example-sitemap-v3final.zip"'
     names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
     assert "robots.txt" in names and "index.html" in names and "sitemap.html" in names
+
+
+def test_nav_routes(imported):
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    post = lambda path, body, h=hdr: imported.post(f"/api/p/example/nav/{path}", json=body, headers=h)
+    assert "Navigation" in imported.get("/p/example/nav").text
+    adm = page_by_path(imported, "/admissions")["id"]
+    assert post("pages", {"menu": "main", "page_ids": [adm]}).json() == {"added": 1}
+    r = post("pages", {"menu": "main", "match": {"filters": [{"field": "url_path", "value": "/admissions/"}]}})
+    assert r.json() == {"added": 3}
+    assert post("headings", {"menu": "footer", "label": "Help"}).status_code == 200
+    menus = imported.get("/api/p/example/nav").json()["menus"]
+    assert [i["display"] for i in menus["main"]][:1] == ["Admissions"] and len(menus["main"]) == 4
+    first, second = menus["main"][0]["id"], menus["main"][1]["id"]
+    assert post("move", {"id": second, "menu": "main", "parent_id": first, "index": 0}).status_code == 200
+    bad = post("move", {"id": first, "menu": "main", "parent_id": second})
+    assert bad.status_code == 400 and "inside itself" in bad.json()["detail"]
+    assert imported.patch(f"/api/p/example/nav/{first}", json={"is_button": True}, headers=hdr).status_code == 200
+    assert imported.delete(f"/api/p/example/nav/{first}", headers=hdr).status_code == 200
+    assert post("headings", {"menu": "main", "label": "X"}, h={"X-CSRF-Token": "forged"}).status_code == 403
+    assert post("pages", {"menu": "nope", "page_ids": [adm]}).status_code == 400
+
+
+def test_menu_views_and_tree_tags(imported):
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    dropped = imported.get("/api/p/example/pages", params={"view": "nav_dropped"}).json()
+    assert sorted(r["url_path"] for r in dropped["data"]) == ["/admissions", "/news"]
+    adm = page_by_path(imported, "/admissions")["id"]
+    imported.post("/api/p/example/nav/pages", json={"menu": "footer", "page_ids": [adm]}, headers=hdr)
+    dropped = imported.get("/api/p/example/pages", params={"view": "nav_dropped"}).json()
+    assert [r["url_path"] for r in dropped["data"]] == ["/news"]
+    assert page_by_path(imported, "/admissions")["menus"] == "footer"
+    roots = imported.get("/api/p/example/tree").json()["roots"]
+    assert next(r for r in roots if r["id"] == adm)["menus"] == ["footer"]
+    unplaced = imported.get("/api/p/example/pages", params={"view": "not_in_menu"}).json()
+    paths = [r["url_path"] for r in unplaced["data"]]
+    assert "/admissions" not in paths and "/" not in paths and "/gone" not in paths and "/news/story-two" not in paths
