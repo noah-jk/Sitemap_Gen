@@ -166,7 +166,7 @@ sp.write_dir(files, "prototype")                           # or: zip_bytes = sp.
 ## Web app (content audit)
 
 `app/` is a self-hosted web app for working a Screaming Frog crawl into a
-content audit: import the crawl, then filter, sort, and set KWALL Reco / Final
+content audit: import the crawl, then filter, sort, and set Recommendation / Final
 Decision / notes in a grid. Each client project is its own SQLite file under
 the data folder.
 

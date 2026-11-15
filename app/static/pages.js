@@ -32,7 +32,7 @@
       {title: "In nav", field: "in_current_nav", width: 80, hozAlign: "center", formatter: "tickCross",
        formatterParams: {crossElement: false}},
       {title: "Collection", field: "collection", width: 110, formatter: "plaintext", headerFilter: "input"},
-      disposition("KWALL Reco", "recommendation"),
+      disposition("Recommendation", "recommendation"),
       disposition("Final Decision", "decision"),
       {title: "Status", field: "status", width: 90, editor: "list", editorParams: {values: ["todo", "done"]},
        headerFilter: "list", headerFilterParams: {values: {"": "", todo: "todo", done: "done"}}},
