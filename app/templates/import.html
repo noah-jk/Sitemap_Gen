@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Import · {{ project }}{% endblock %}
+{% block content %}
+<h1>Import a crawl</h1>
+<section class="card">
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/p/{{ slug }}/import" enctype="multipart/form-data" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Screaming Frog "Internal: All" export (.csv)
+      <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <label>GA4 date range <input name="ga_date_range" maxlength="100" placeholder="2025-06-01 to 2026-06-01"></label>
+    <button type="submit" class="primary">Import</button>
+  </form>
+  <p class="muted small">Re-importing a newer crawl updates crawl and traffic numbers by URL. Recommendations, decisions,
+    notes, and tree position are kept. Pages missing from the new crawl are flagged, not deleted.</p>
+</section>
+
+{% if summary %}
+<section class="card">
+  <h2>Last import</h2>
+  <p><strong>{{ last.filename }}</strong>
+    {%- if last.crawl_timestamp %}, crawled {{ last.crawl_timestamp }}{% endif %}
+    {%- if last.ga_date_range %}, GA4 {{ last.ga_date_range }}{% endif %}</p>
+  <dl class="stats">
+    <div><dt>Rows read</dt><dd>{{ summary.rows_read }}</dd></div>
+    <div><dt>New pages</dt><dd>{{ summary.pages_new }}</dd></div>
+    <div><dt>Updated pages</dt><dd>{{ summary.pages_updated }}</dd></div>
+    <div><dt>Gone pages to review</dt><dd>{{ summary.error_pages }}</dd></div>
+    <div><dt>Missing from this crawl</dt><dd>{{ summary.pages_missing }}</dd></div>
+    <div><dt>Existing redirects</dt><dd>{{ summary.redirects }}</dd></div>
+  </dl>
+  <p class="muted small">Site host: <code>{{ settings.canonical_host or "not detected" }}</code>
+    · Title suffix removed from labels: <code>{{ settings.title_suffix or "none" }}</code></p>
+  {% if summary.skipped %}
+  <h3>Skipped rows</h3>
+  <ul>{% for reason, n in summary.skipped.items() %}<li>{{ n }} × {{ reason }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if issues %}
+<section class="card">
+  <h2>Site issues <span class="muted">({{ issues|length }})</span></h2>
+  <p class="muted small">Problems on the live site found during import. Worth passing on to the client.</p>
+  <table class="plain">
+    <thead><tr><th>Issue</th><th>URL</th></tr></thead>
+    <tbody>
+    {% for i in issues %}
+      <tr><td>{{ i.detail }}</td><td><code>{{ i.url }}</code></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

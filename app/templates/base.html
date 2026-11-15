@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Sitemap Gen{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+{% block head %}{% endblock %}
+</head>
+<body{% block body_attrs %}{% endblock %}>
+<header class="topbar">
+  <a class="brand" href="/">Sitemap Gen</a>
+  {% if project %}
+  <span class="project-name">{{ project }}</span>
+  <nav class="tabs" aria-label="Project">
+    <a href="/p/{{ slug }}/pages"{% if tab == "pages" %} aria-current="page"{% endif %}>Pages</a>
+    <a href="/p/{{ slug }}/import"{% if tab == "import" %} aria-current="page"{% endif %}>Import</a>
+  </nav>
+  {% endif %}
+  {% if user %}
+  <form class="logout" method="post" action="/logout">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Log out</button>
+  </form>
+  {% endif %}
+</header>
+<main class="{% block main_class %}content{% endblock %}">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

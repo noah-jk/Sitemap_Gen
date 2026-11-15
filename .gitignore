@@ -10,3 +10,16 @@ __pycache__/
 # macOS
 .DS_Store
 sitemap.md
+
+# Crawl exports and project data (client data, never commit)
+*.csv
+*.xlsx
+*.db
+projects/
+
+# Local virtualenv
+.venv/
+data/
+backups/
+# Synthetic test data only, never real crawls
+!tests/fixtures/*.csv

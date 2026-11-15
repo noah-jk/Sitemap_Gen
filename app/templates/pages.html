@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Pages · {{ project }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/vendor/tabulator.min.css">{% endblock %}
+{% block body_attrs %} data-slug="{{ slug }}" data-csrf="{{ csrf }}" data-dispositions="{{ dispositions|join(',') }}"{% endblock %}
+{% block main_class %}grid-page{% endblock %}
+{% block content %}
+{% if count == 0 %}
+<section class="card"><p>No pages yet. <a href="/p/{{ slug }}/import">Import a crawl</a> to get started.</p></section>
+{% else %}
+<div class="grid-bar"><span id="grid-status" role="status" aria-live="polite"></span></div>
+<div id="grid"></div>
+<script src="/static/vendor/tabulator.min.js"></script>
+<script src="/static/pages.js"></script>
+{% endif %}
+{% endblock %}
