@@ -90,8 +90,9 @@ def test_stale_edit_is_rejected(conn):
     assert conn.execute("SELECT notes FROM pages WHERE id = ?", (i["a"],)).fetchone()[0] == "first"
 
 
-@pytest.mark.parametrize("changes", [{"decision": "merge"}, {"status": "doing"}, {"label": "x"},
-                                     {"redirect_to": "5"}, {"content_targets": "1,2"}])
+@pytest.mark.parametrize("changes", [{"decision": "merge"}, {"status": "doing"},
+                                     {"redirect_to": "5"}, {"content_targets": "1,2"},
+                                     {"url_path": "/x"}, {"label": "   "}, {"is_button": "yes"}])
 def test_bad_values_rejected(conn, changes):
     with pytest.raises(rules.RuleError):
         save(conn, ids(conn)["a"], **changes)

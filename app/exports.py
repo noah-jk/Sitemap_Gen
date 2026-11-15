@@ -146,34 +146,9 @@ def redirect_map(conn) -> RedirectMap:
 
 def markdown_sitemap(conn, project_name: str, today: str) -> str:
     """The to-be tree as a nested list the sitemap2proto.py CLI can read."""
-    rows = conn.execute(
-        "SELECT id, parent_id, label, url_path, sort_order, is_button, collection, status_code, "
-        "COALESCE(decision, recommendation) AS e FROM pages").fetchall()
-    by_id = {r["id"]: r for r in rows}
-
-    def included(r) -> bool:
-        if r["url_path"] == "/" or r["collection"] or r["e"] in rules.REMOVED:
-            return False
-        return not (r["status_code"] or 0) >= 400 or r["e"] == "keep"
-
-    children: Dict[Optional[int], list] = {}
-    for r in rows:
-        if not included(r):
-            continue
-        parent = r["parent_id"]
-        while parent is not None and not included(by_id[parent]):
-            parent = by_id[parent]["parent_id"]
-        children.setdefault(parent, []).append(r)
-
-    lines: List[str] = []
-
-    def walk(parent: Optional[int], depth: int) -> None:
-        for r in sorted(children.get(parent, []), key=lambda r: (r["sort_order"], r["label"].lower())):
-            label = " ".join(r["label"].split())
-            lines.append(f"{'  ' * depth}- {label}{' [button]' if r['is_button'] else ''}")
-            walk(r["id"], depth + 1)
-
-    walk(None, 0)
+    from app import tree
+    lines = [f"{'  ' * (depth - 1)}- {node.label}{' [button]' if node.is_button else ''}"
+             for node, _, depth in tree.walk(tree.load(conn))]
     collections = conn.execute("SELECT collection, count(*) FROM pages WHERE collection <> '' "
                                "AND COALESCE(decision, recommendation, '') NOT IN ('delete','combine','split') "
                                "GROUP BY collection ORDER BY collection").fetchall()

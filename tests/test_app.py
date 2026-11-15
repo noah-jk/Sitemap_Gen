@@ -184,7 +184,7 @@ def test_edit_saves_and_detects_conflicts(imported):
     assert stale.status_code == 409 and stale.json()["row"]["decision"] == "keep"
     fresh = r.json()["row"]
     assert patch(fresh, decision="merge").status_code == 400
-    assert patch(fresh, label="renamed").status_code == 400
+    assert patch(fresh, url_path="/renamed").status_code == 400
     assert patch(fresh, tok="forged", notes="x").status_code == 403
     cleared = patch(fresh, decision=None)
     assert cleared.status_code == 200 and cleared.json()["row"]["decision"] is None
@@ -307,3 +307,67 @@ def test_secure_cookie_flag_is_opt_in(tmp_path, monkeypatch, env, secure):
     with TestClient(create_app(str(tmp_path / "data"))) as c:
         cookie = c.get("/login").headers["set-cookie"].lower()
     assert ("secure" in cookie) == secure
+
+
+def test_tree_routes(imported):
+    token = grid_csrf(imported)
+    hdr = {"X-CSRF-Token": token}
+    roots = imported.get("/api/p/example/tree").json()["roots"]
+    admissions = next(r for r in roots if r["label"] == "Admissions")
+    assert admissions["descendants"] == 3
+    new = imported.post("/api/p/example/tree/pages", json={"label": "Student Life", "parent_id": None}, headers=hdr)
+    new_id = new.json()["id"]
+    r = imported.post("/api/p/example/tree/move", json={"id": admissions["id"], "parent_id": new_id, "index": 0},
+                      headers=hdr)
+    assert r.status_code == 200
+    roots = imported.get("/api/p/example/tree").json()["roots"]
+    life = next(r for r in roots if r["label"] == "Student Life")
+    assert life["is_new"] and [c["label"] for c in life["children"]] == ["Admissions"] and life["descendants"] == 4
+    loop = imported.post("/api/p/example/tree/move", json={"id": new_id, "parent_id": admissions["id"]}, headers=hdr)
+    assert loop.status_code == 400 and "under itself" in loop.json()["detail"]
+    assert imported.post("/api/p/example/tree/move", json={"id": new_id}, headers={"X-CSRF-Token": "x"}).status_code == 403
+    assert imported.delete(f"/api/p/example/tree/pages/{admissions['id']}", headers=hdr).status_code == 400
+    assert imported.delete(f"/api/p/example/tree/pages/{new_id}", headers=hdr).status_code == 200
+    assert "Tree" in imported.get("/p/example/tree").text
+
+
+def test_bulk_move_under_a_page(imported):
+    token = grid_csrf(imported)
+    hdr = {"X-CSRF-Token": token}
+    section = imported.post("/api/p/example/tree/pages", json={"label": "About Us"}, headers=hdr).json()["id"]
+    r = imported.post("/api/p/example/pages/bulk", headers=hdr, json={
+        "match": {"filters": [{"field": "url_path", "value": "/about/"}]}, "changes": {"parent_id": section}})
+    assert r.json()["count"] == 2
+    rows = imported.get("/api/p/example/pages", params={"filter[0][field]": "parent_label", "filter[0][value]": "About Us"}).json()
+    assert sorted(x["url_path"] for x in rows["data"]) == ["/about/contact", "/about/history"]
+    bad = imported.post("/api/p/example/pages/bulk", headers=hdr, json={"ids": [section], "changes": {"parent_id": section}})
+    assert bad.status_code == 400
+
+
+def test_prototype_preview_settings_and_zip(imported, tmp_path):
+    import io, zipfile
+    html = imported.get("/p/example/prototype").text
+    preview = re.search(r'<iframe src="([^"]+)"', html)[1]
+    assert 'sandbox="allow-scripts"' in html
+    with TestClient(imported.app) as anonymous:  # the preview needs no login, only the signed link
+        r = anonymous.get(preview)
+        assert r.status_code == 200 and "Admissions" in r.text
+        assert r.headers["content-security-policy"].startswith("sandbox allow-scripts")
+        assert r.headers["x-frame-options"] == "SAMEORIGIN"
+        css = anonymous.get(preview.replace("index.html", "style.css"))
+        assert css.headers["content-type"].startswith("text/css")
+        assert anonymous.get(preview.replace("index.html", "../../etc/passwd")).status_code == 404
+        assert anonymous.get("/preview/forged-token/index.html").status_code == 404
+    token = csrf_from(html)
+    r = imported.post("/p/example/prototype/settings", data={
+        "csrf": token, "menu": "mega", "nav_style": "sidebar", "max_depth": "1", "version_label": "v3 final!",
+        "footer_md": "- Help\n  - Contact Us\n", "utility_md": "- Apply now\n", "sticky_header": "1"},
+        follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("saved=1")
+    page = imported.get(preview).text
+    assert "is-sticky" in page and "Apply now" in page and "Plus 3 more pages" in imported.get(
+        preview.replace("index.html", "admissions/index.html")).text
+    z = imported.get("/p/example/prototype/download")
+    assert z.headers["content-disposition"] == 'attachment; filename="example-sitemap-v3final.zip"'
+    names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
+    assert "robots.txt" in names and "index.html" in names and "sitemap.html" in names

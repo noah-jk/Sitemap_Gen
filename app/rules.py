@@ -12,9 +12,10 @@ REMOVED = ("delete", "combine", "split")  # pages that won't exist after launch
 _REM = "('delete','combine','split')"
 STATUSES = ("todo", "done")
 MAX_NOTES = 5000
-SCALAR_FIELDS = ("recommendation", "decision", "status", "notes", "redirect_to")
+SCALAR_FIELDS = ("recommendation", "decision", "status", "notes", "redirect_to", "label", "is_button")
+MAX_LABEL = 200
 EDITABLE = set(SCALAR_FIELDS) | {"content_targets"}
-BULK_EDITABLE = {"recommendation", "decision", "status", "redirect_to"}
+BULK_EDITABLE = {"recommendation", "decision", "status", "redirect_to", "parent_id"}
 
 _CHECKS = [
     ("p.e IN ('combine','split') AND p.redirect_to IS NULL",
@@ -76,11 +77,19 @@ def _clean(changes: dict, allowed: set) -> dict:
                 raise RuleError(["status must be todo or done."])
         elif field == "notes":
             value = str(value or "")[:MAX_NOTES]
-        elif field == "redirect_to":
+        elif field == "label":
+            value = " ".join(str(value or "").split())[:MAX_LABEL]
+            if not value:
+                raise RuleError(["Give the page a name."])
+        elif field == "is_button":
+            if not isinstance(value, bool):
+                raise RuleError(["is_button must be true or false."])
+            value = int(value)
+        elif field in ("redirect_to", "parent_id"):
             if value in (None, ""):
                 value = None
             elif isinstance(value, bool) or not isinstance(value, int):
-                raise RuleError(["redirect_to must be a page id."])
+                raise RuleError([f"{field} must be a page id."])
         elif field == "content_targets":
             if not isinstance(value, list) or not all(isinstance(v, int) and not isinstance(v, bool) for v in value):
                 raise RuleError(["content_targets must be a list of page ids."])
@@ -102,6 +111,22 @@ def _check_targets_exist(conn, page_ids: List[int], targets: List[int]) -> None:
         raise RuleError(["That target page doesn't exist any more. Reload and pick again."])
     if set(page_ids) & set(targets):
         raise RuleError(["A page can't redirect to itself."])
+
+
+def check_parent(conn, page_ids: List[int], parent: Optional[int]) -> None:
+    if parent is None:
+        return
+    row = conn.execute("SELECT id, COALESCE(decision, recommendation) AS e FROM pages WHERE id = ?",
+                       (parent,)).fetchone()
+    if row is None:
+        raise RuleError(["That parent page doesn't exist any more. Reload and try again."])
+    if row["e"] in REMOVED:
+        raise RuleError(["Pages can't go under a page that's being removed."])
+    below = {r[0] for r in conn.execute(
+        "WITH RECURSIVE d(id) AS (SELECT value FROM json_each(?) UNION SELECT p.id FROM pages p JOIN d ON p.parent_id = d.id) "
+        "SELECT id FROM d", (json.dumps(page_ids),))}
+    if parent in below:
+        raise RuleError(["A page can't go under itself or one of its own sub-pages."])
 
 
 def dependents(conn, page_id: int) -> int:
@@ -167,6 +192,8 @@ def bulk_apply(conn: sqlite3.Connection, ids: List[int], changes: dict) -> Tuple
                 raise RuleError([f'"{label}" is in the selection, and a page can\'t redirect to itself. '
                                  f'Unselect it and try again.'])
             _check_targets_exist(conn, [], [target])
+        if "parent_id" in changes:
+            check_parent(conn, ids, changes["parent_id"])
         sets = "".join(f"{k} = ?, " for k in changes)
         cur = conn.execute(f"UPDATE pages SET {sets}updated_at = ? WHERE id IN (SELECT value FROM json_each(?))",
                            [*changes.values(), now_ms(), json.dumps(ids)])

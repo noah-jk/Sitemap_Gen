@@ -14,8 +14,10 @@
   <span class="project-name">{{ project }}</span>
   <nav class="tabs" aria-label="Project">
     <a href="/p/{{ slug }}/pages"{% if tab == "pages" %} aria-current="page"{% endif %}>Pages</a>
-    <a href="/p/{{ slug }}/import"{% if tab == "import" %} aria-current="page"{% endif %}>Import</a>
+    <a href="/p/{{ slug }}/tree"{% if tab == "tree" %} aria-current="page"{% endif %}>Tree</a>
+    <a href="/p/{{ slug }}/prototype"{% if tab == "prototype" %} aria-current="page"{% endif %}>Prototype</a>
     <a href="/p/{{ slug }}/exports"{% if tab == "exports" %} aria-current="page"{% endif %}>Exports</a>
+    <a href="/p/{{ slug }}/import"{% if tab == "import" %} aria-current="page"{% endif %}>Import</a>
   </nav>
   {% endif %}
   {% if user %}

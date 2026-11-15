@@ -398,7 +398,7 @@ def _build_children_block(node: Node, root: Node, here: str, anc: List[Node], na
     if node is root:
         children_block = ""
     elif nav_style == "sidebar" and len(anc) > 1:
-        children_block = ""
+        children_block = f'<section class="children">{_more_below(node)}</section>' if node.more_below else ""
         sidebar_html = build_section_sidebar(anc[1], here, node)
     elif node.children:
         cards = "".join(

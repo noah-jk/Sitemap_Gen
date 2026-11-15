@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Tree · {{ project }}{% endblock %}
+{% block body_attrs %} data-slug="{{ slug }}" data-csrf="{{ csrf }}"{% endblock %}
+{% block main_class %}content wide{% endblock %}
+{% block content %}
+<div class="tree-head">
+  <h1>Navigation tree</h1>
+  <p class="muted small">The pages being kept, nested as they'll be in the new site. Drag the ⠿ handle to reorder or
+    move a page (its sub-pages go with it), or use <strong>Move…</strong>. Open a page with ▸ to drop pages into it.
+    Removed pages are left out and their sub-pages move up; news and calendar items are counted on their parent.</p>
+  <div class="toolbar">
+    <button type="button" id="add-top">Add top-level page</button>
+    <button type="button" id="collapse-all">Collapse all</button>
+    <span id="tree-status" role="status" aria-live="polite" class="muted"></span>
+  </div>
+</div>
+<div class="tree-root">
+  <div class="tree-home"><strong>Home</strong> <span class="muted" id="tree-total"></span></div>
+  <ul class="tree-list" id="tree" data-parent=""></ul>
+</div>
+
+<dialog id="move-dialog" aria-labelledby="mv-title">
+  <form id="mv-form">
+    <h2 id="mv-title"></h2>
+    <p class="muted small">Pick the page it should go under. It goes at the end; drag it afterwards to fine-tune the order.</p>
+    <button type="button" id="mv-top">Make it a top-level page</button>
+    <input type="search" id="mv-search" placeholder="Search pages by name or path" autocomplete="off"
+           aria-label="Search for the new parent page">
+    <ul id="mv-results" class="results"></ul>
+    <p class="error" id="mv-error" role="alert"></p>
+    <div class="row end"><button type="button" id="mv-cancel">Cancel</button></div>
+  </form>
+</dialog>
+<script src="/static/vendor/Sortable.min.js"></script>
+<script src="/static/tree.js"></script>
+{% endblock %}

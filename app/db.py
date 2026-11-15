@@ -134,6 +134,11 @@ PROJECT_MIGRATIONS: List[str] = [
       definition TEXT NOT NULL
     );
     """,
+    """
+    ALTER TABLE settings ADD COLUMN footer_md TEXT NOT NULL DEFAULT '';
+    ALTER TABLE settings ADD COLUMN utility_md TEXT NOT NULL DEFAULT '';
+    ALTER TABLE settings ADD COLUMN max_depth INTEGER NOT NULL DEFAULT 0 CHECK(max_depth >= 0);
+    """,
 ]
 
 

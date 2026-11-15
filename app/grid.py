@@ -11,10 +11,11 @@ FIELDS: Dict[str, str] = {
     "collection": "p.collection", "recommendation": "p.recommendation", "decision": "p.decision",
     "status": "p.status", "notes": "p.notes", "missing_from_crawl": "p.missing_from_crawl",
     "redirect_to": "p.redirect_to", "redirect_label": "t.label", "redirect_path": "t.url_path",
+    "parent_id": "p.parent_id", "parent_label": "pp.label", "is_new": "p.is_new",
     "content_targets": "(SELECT json_group_array(target_id) FROM page_content_targets WHERE page_id = p.id)",
     "problem": "pr.msg", "updated_at": "p.updated_at",
 }
-TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "problem"}
+TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem"}
 EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl"}
 
 EFFECTIVE = "COALESCE(p.decision, p.recommendation)"
@@ -30,7 +31,7 @@ PRESETS: Dict[str, Tuple[str, str]] = {
     "missing": ("Missing from the latest crawl", "p.missing_from_crawl = 1"),
 }
 
-FROM = (f"FROM pages p LEFT JOIN pages t ON t.id = p.redirect_to "
+FROM = (f"FROM pages p LEFT JOIN pages t ON t.id = p.redirect_to LEFT JOIN pages pp ON pp.id = p.parent_id "
         f"LEFT JOIN (SELECT id, msg FROM ({PROBLEMS_SQL}) WHERE msg <> '') pr ON pr.id = p.id")
 SELECT = "SELECT " + ", ".join(f"{expr} AS {name}" for name, expr in FIELDS.items()) + " " + FROM
 

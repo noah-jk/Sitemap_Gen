@@ -178,6 +178,18 @@ allowed, and those pages show up in the **Problems** view. Bulk edits apply to
 the selected rows or to every page matching the current filters. Filters and
 sort can be saved as named views.
 
+The **Tree** tab shows the pages being kept as the new navigation: drag the
+⠿ handle (or use **Move…**) to reorder and re-nest pages, add new pages that
+don't exist on the current site, rename pages, and mark top-level pages as nav
+buttons. Each page shows how many pages sit below it and how many it absorbs.
+In the grid, the bulk bar can also move every matching page under a section.
+
+The **Prototype** tab builds the clickable prototype from that tree, with menu
+style, depth, utility nav and footer settings, and previews it in a sandboxed
+frame. The zip download (`<project>-sitemap-<version>.zip`) has a `noindex`
+tag on every page and a `robots.txt` that blocks search engines, ready to
+upload to S3.
+
 The **Exports** tab has the redirect map (only pages with a Final Decision;
 old redirects that would chain through a removed page are re-pointed), the
 content audit CSV, and a Markdown sitemap that `sitemap2proto.py` can read.
