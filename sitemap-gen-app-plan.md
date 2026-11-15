@@ -91,7 +91,8 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 ```
 
 - **Stack:** FastAPI (Pydantic validation at every input boundary, which matters most for the public tree-test endpoint) with server-rendered Jinja pages and small JSON endpoints for the grid. The generator is imported as a library, so everything is one language.
-- **Grid:** Tabulator (MIT), vendored. Remote pagination, sorting, and filtering, so the browser only holds one page of rows. Cells use the plain-text formatter, never HTML.
+- **Grid:** Tabulator (MIT), vendored. Remote pagination, sorting, and filtering, so the browser only holds one page of rows. Cells use the plain-text formatter, never HTML. Sort and filter fields come from a server-side allowlist, never straight from the request.
+- **Grid spike result (Nov 15):** Tabulator 6.3 + FastAPI + SQLite, on the full whittier.edu crawl (1,533 rows) and a synthetic 53,655-row copy. SQL queries took 1-17 ms at both sizes. In a headless browser: first render about 175 ms, sort about 100-120 ms, page change about 120-170 ms, inline edit saved in about 13 ms. Filtering shows results about 300 ms after typing stops (Tabulator's built-in delay). A conflicting edit was rejected and the row reloaded. Import took 0.14 s for the real crawl, under 1 s at 53k rows. Grid performance is not a risk at this scale.
 - **SQLite settings:** WAL mode, `foreign_keys=ON`, `busy_timeout` set. Migrations versioned with `PRAGMA user_version` and run across every project file on startup.
 - **Auth:** single login with a session cookie (`HttpOnly`, `SameSite=Strict`, `Secure` behind the proxy), CSRF token on forms. A `users` table from day one, so adding a coworker is a row, not a redesign.
 - **Concurrent edits (for the coworker case):** each row carries `updated_at`; a save that doesn't match the stored value is rejected and the grid reloads the row. No silent last-write-wins.
@@ -165,28 +166,32 @@ Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that show
 
 ### A. Crawl import
 
-Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4 integration on) on Nov 15, 2026.
+Checked against a full "Internal: All" export of whittier.edu on Nov 15, 2026: 3,628 rows, 81 columns, UTF-8, GA4 integration on. After the rules below it comes down to **1,468 pages**, 33 error pages to review, and 387 existing redirects. 392 of the pages are news posts.
 
 - Stdlib `csv`, reading the header by name (Screaming Frog's column order changes between versions). Mapped columns: Address, Content Type, Status Code, Title 1, H1-1 (fall back to H1-2), Meta Description 1, Canonical Link Element 1, Crawl Depth, Inlinks, Unique Inlinks, % of Total, Hash, Redirect URL, Redirect Type, GA4 Sessions / Views / Engaged sessions / Engagement rate / Key events. Every other column goes into a `crawl_extra` JSON field so nothing is lost.
 - **Columns that were empty in the sample:** Indexability, Word Count, Link Score, and the near-duplicate columns. Link Score and near-duplicates only fill in after Crawl Analysis runs, and near-duplicates must be turned on in the crawl config. The importer treats all of these as optional.
 - **What gets imported:** the export mixes pages, redirects, errors, and files (the sample had 69 × 200, 8 × 301, 1 × 302, 1 × 403, 1 PDF).
   - HTML 200s become `pages` rows.
   - 3xx rows go into `existing_redirects` (source, target, type), not `pages`.
-  - 4xx/5xx rows become pages with disposition `review` and a reason.
+  - 4xx/5xx rows become pages with recommendation `review` and a reason. Those still getting GA4 traffic are called out ("404 but still visited, needs a redirect"); the full crawl had `/admission/admitted` at 35 sessions.
+  - 4xx rows that are really broken file links (a file extension, or under `/sites/default/files`) are dropped with the other files. The full crawl had 15.
+  - 4xx rows whose path contains a hostname (`/about/www.whittier.edu/admission/visit`) come from links missing `https://` on the live site. They aren't pages; they go in an import "site issues" list. The full crawl had 17.
   - PDFs, CSS, images, and other non-HTML files are dropped. This is an IA tool, so only HTML pages are in scope. The import summary reports how many rows were skipped and why.
 - **Normalization and variant merging:** Screaming Frog often lists `https://whittier.edu`, `https://www.whittier.edu`, and `https://www.whittier.edu/` as separate rows. The importer reduces every address to a normalized key (one canonical host per project, trailing slash stripped except on the root, fragments dropped, query strings sorted or stripped by rule) and merges rows that share a key into one page:
   - The 200 response on the canonical host supplies the crawl data.
   - Variants that redirect are recorded in `existing_redirects`.
-  - GA4 numbers take the highest value among the variants, not the sum, because the GA4 integration can attach the same path's numbers to several variants.
+  - GA4 numbers: one value per host and path, summed across hosts. In the full crawl the GA4 integration gave each host its own traffic (bare `whittier.edu` had about 5%), while `http://` and trailing-slash variants repeated the same numbers as the page they redirect to. Summing everything would double-count those; taking the max would drop the bare-host traffic.
   - The merged variant addresses are kept on the page so nothing is silently lost.
 - Redirect targets may be off-site (`admission.whittier.edu`, `wcpoets.com`) and are kept as-is.
 - **Non-HTML rows:** CSS, images, and documents come through the export even with those turned off in the crawl config. The importer filters by `Content Type`, so the crawl settings don't need to be perfect.
-- **Labels:** titles carry a site-wide suffix (" | Whittier College" on 67 of 69). Detect the most common suffix and store a cleaned `label` for the grid, tree, and prototype; keep the raw title.
-- **Current-nav flag:** `% of Total` splits cleanly into ~52-54% (linked from every page: header, footer, or utility nav) and ~0-2%. Pages above a threshold get `in_current_nav = true`, which shows the existing global navigation in the grid for free.
+- **Whole site on two hosts:** whittier.edu serves 1,262 pages with a 200 on both `whittier.edu` and `www.whittier.edu`, each with a self-referencing canonical, and no redirect between them. That's a finding for the client. The redirect map exports it as one host-level rule (bare → `www`), not 1,262 lines.
+- **Labels:** titles carry a site-wide suffix (" | Whittier College" on 1,466 of 1,467). Detect the most common suffix and store a cleaned `label` for the grid, tree, and prototype; keep the raw title. The home page puts the site name first ("Whittier College | 4-Year Private…"), so strip it as a prefix too.
+- **Duplicate labels:** 89 pages share a label with another page ("Honor Society" ×11, "Clubs & Organizations" ×11, "Contact Us" ×8). The grid shows the path next to the label, and everything links by ID.
+- **Current-nav flag:** `% of Total` splits cleanly. In the full crawl, 45 pages sit at 50-55% (linked from every page: header, footer, or utility nav), 7 at 10-15%, and the rest near 0%. Pages above 25% get `in_current_nav = true`, which shows the existing global navigation in the grid for free.
 - **Ignore:** H2s (the sample's H2-1/H2-2 are nav labels on every page), Last Modified (the server returns the crawl time, not the content date), GA4 Total revenue, and the semantic-similarity columns (they need an external AI provider).
 - **Initial tree position:** URL path segments are a weak guess here. Student support pages sit at `/counseling`, `/studenthealth`, `/accessibility`, `/caas`, and `/campuslife/studentsupport`. If the site has breadcrumbs, a Screaming Frog Custom Extraction of the breadcrumb trail gives a better starting tree; use URL segments only as a fallback.
 - **Collections:** high-volume patterns such as `/calendar/*` (events) and `/news/*` (posts) roll up into one collection node with a count in the tree. Every row still appears in the grid.
-- **Exact duplicates:** rows with the same `Hash` are exact duplicates with no near-duplicate setting needed.
+- **Exact duplicates:** rows on the same host with the same `Hash` are exact duplicates, no near-duplicate setting needed. Hashes differ between the two hosts' copies of a page (the HTML contains host-specific links), so they don't help with cross-host duplicates; variant merging already covers those.
 - **Import metadata:** an `imports` row per upload records the file name, crawl timestamp, and GA4 date range (the CSV doesn't contain the range, so the import form asks for it).
 - Re-importing a newer crawl updates rows by URL without losing decisions. Pages missing from the new crawl are flagged, not deleted.
 - Upload limits on the import form: size cap, CSV only, parsed in a background task so a big crawl doesn't block the app.
@@ -212,7 +217,7 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
 
 ### E. Exports
 - **Prototype zip**, built in memory, for manual S3 upload: `robots.txt` disallowing everything, `noindex` meta tags, filename with project and version (`clientname-sitemap-v3.zip`). No AWS credentials on the homelab.
-- **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved, including chains through `existing_redirects`.
+- **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved, including chains through `existing_redirects`. Host-level rules (bare host → `www`) are one line, not one per page.
 - **Content audit** as CSV for the client, in the same layout as the current hand-groomed sheet: Address, KWALL Reco, Final Decision, Notes, then the crawl and GA4 columns, with empty columns dropped. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
 - **Markdown sitemap**, for the existing CLI.
 
