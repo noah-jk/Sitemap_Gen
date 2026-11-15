@@ -41,6 +41,10 @@ class NotLoggedIn(Exception):
     pass
 
 
+class FormExpired(Exception):
+    pass
+
+
 class Edit(BaseModel):
     field: str
     value: Optional[str]
@@ -77,6 +81,15 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             return JSONResponse({"detail": "not logged in"}, status_code=401)
         return RedirectResponse("/login", status_code=303)
 
+    @app.exception_handler(FormExpired)
+    async def form_expired(request: Request, exc: FormExpired):
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "This page has expired. Reload it and try again."}, status_code=403)
+        if request.url.path == "/login":
+            return render(request, "login.html", status_code=403,
+                          error="The login page had expired. Enter your details again.")
+        return render(request, "expired.html", status_code=403)
+
     # ---- helpers -----------------------------------------------------------
 
     def csrf_token(request: Request) -> str:
@@ -87,7 +100,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     def check_csrf(request: Request, token: Optional[str]) -> None:
         expected = request.session.get("csrf")
         if not expected or not token or not hmac.compare_digest(expected, token):
-            raise HTTPException(403, "invalid or missing CSRF token; reload the page and try again")
+            raise FormExpired()
 
     def require_user(request: Request) -> int:
         uid = request.session.get("uid")

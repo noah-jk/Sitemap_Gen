@@ -174,7 +174,7 @@ Run locally:
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-export SITEMAP_DATA_DIR=./data SITEMAP_INSECURE_COOKIES=1   # plain http on localhost only
+export SITEMAP_DATA_DIR=./data
 .venv/bin/python -m app.manage create-user noah
 .venv/bin/uvicorn app.main:create_app --factory --port 8000
 ```
@@ -199,8 +199,9 @@ built there.
   `compose.yaml`, then `docker compose pull && docker compose up -d` and
   `docker compose exec app python -m app.manage create-user noah`.
 
-The proxy host must use HTTPS: the login cookie is HTTPS-only. Data lives in
-the `sitemap_data` volume.
+Plain `http` works. If the app is only ever reached over HTTPS, set
+`SITEMAP_SECURE_COOKIES=1` so the login cookie is never sent over plain
+http. Data lives in the `sitemap_data` volume.
 
 Admin commands (`python -m app.manage ...`): `create-user NAME`, `migrate`,
 and `backup DEST_DIR`, which writes consistent copies of every database and

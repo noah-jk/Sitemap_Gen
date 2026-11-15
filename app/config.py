@@ -7,8 +7,8 @@ def data_dir() -> str:
 
 
 def secure_cookies() -> bool:
-    """Cookies are HTTPS-only unless explicitly turned off for local development."""
-    return os.environ.get("SITEMAP_INSECURE_COOKIES", "") != "1"
+    """HTTPS-only cookies are opt-in, so the app also works over plain http on a LAN."""
+    return os.environ.get("SITEMAP_SECURE_COOKIES", "") == "1"
 
 
 def secret_key(directory: str) -> str:

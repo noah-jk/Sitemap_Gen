@@ -74,7 +74,8 @@ def test_login_and_logout(client):
 def test_login_requires_csrf_token(client):
     client.get("/login")
     r = client.post("/login", data={"username": "noah", "password": PASSWORD, "csrf": "forged"})
-    assert r.status_code == 403
+    assert r.status_code == 403 and "login page had expired" in r.text
+    assert login(client).status_code == 303  # the re-rendered form works
 
 
 def test_repeated_failed_logins_are_blocked(client):
@@ -198,3 +199,18 @@ def test_user_management_errors(tmp_path):
     with pytest.raises(ValueError, match="12 characters"):
         auth.set_password(store, "noah", "short")
     assert auth.list_usernames(store) == ["noah"]
+
+
+def test_expired_form_shows_a_page_not_json(logged_in):
+    token = csrf_from(logged_in.get("/").text)
+    r = logged_in.post("/projects", data={"name": "X", "slug": "x", "csrf": "stale"})
+    assert r.status_code == 403 and "This page expired" in r.text
+    assert make_project(logged_in, slug="x").status_code == 303
+
+
+@pytest.mark.parametrize("env,secure", [("", False), ("1", True)])
+def test_secure_cookie_flag_is_opt_in(tmp_path, monkeypatch, env, secure):
+    monkeypatch.setenv("SITEMAP_SECURE_COOKIES", env)
+    with TestClient(create_app(str(tmp_path / "data"))) as c:
+        cookie = c.get("/login").headers["set-cookie"].lower()
+    assert ("secure" in cookie) == secure
