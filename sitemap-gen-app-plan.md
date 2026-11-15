@@ -115,9 +115,10 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 | traffic columns | GA4 sessions, views, engaged sessions, engagement rate, key events; Search Console clicks/impressions if connected. Optional. |
 | duplicate columns | Near-duplicate count and closest match, when Crawl Analysis ran. Optional. |
 | `crawl_extra` | JSON of every unmapped crawl column. |
-| `disposition` | `keep` / `delete` / `review` / `combine` / `split` (`CHECK` constraint). |
+| `recommendation` | KWALL's recommended disposition: `keep` / `delete` / `review` / `combine` / `split` (`CHECK` constraint). Exported as "KWALL Reco". |
+| `decision` | The client's final disposition, same values. Empty until decided. Exported as "Final Decision". |
 | `redirect_to` | Foreign key to one row: where the old URL sends visitors. |
-| `status` | `proposed` / `approved` / `done`. Progress, kept separate from disposition. |
+| `status` | `todo` / `done`. Implementation progress at launch, kept separate from the decision. |
 | `notes` | Free text, such as what content to carry over. |
 | `parent_id`, `sort_order` | Position in the **new** navigation tree. |
 | `path` | Stored path such as `/admissions/apply/`, so the grid can sort and indent. |
@@ -140,6 +141,8 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 
 ### How each disposition uses the links
 
+"Disposition" below means the effective value: `decision` when set, otherwise `recommendation`. Keeping both preserves what KWALL recommended when the client overrides it.
+
 | Disposition | `redirect_to` | content targets | Meaning |
 |---|---|---|---|
 | keep | empty | empty | Page survives. |
@@ -156,7 +159,7 @@ Screaming Frog CSV ──► importer ──► [ SQLite: one file per project ]
 4. For `split`, `redirect_to` must be one of the content targets.
 5. If a target's disposition changes, flag every row pointing at it.
 
-Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that shows up in the "problems" view. The same checks run again across the whole table before any export.
+Rules 1-4 reject the write in the same transaction. Rule 5 sets a flag that shows up in the "problems" view. The same checks run again across the whole table before any export. The redirect map uses only rows with a final `decision`; rows with a recommendation but no decision are listed separately as undecided.
 
 ## Capabilities
 
@@ -171,7 +174,13 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
   - 3xx rows go into `existing_redirects` (source, target, type), not `pages`.
   - 4xx/5xx rows become pages with disposition `review` and a reason.
   - PDFs and other files become rows with `page_type = document`, kept out of the tree but in the audit.
-- **Normalization:** one canonical host per project (the sample had both `whittier.edu` and `www.whittier.edu`), strip trailing slashes except on the root, drop fragments, sort or strip query strings by rule. Redirect targets may be off-site (`admission.whittier.edu`, `wcpoets.com`) and are kept as-is.
+- **Normalization and variant merging:** Screaming Frog often lists `https://whittier.edu`, `https://www.whittier.edu`, and `https://www.whittier.edu/` as separate rows. The importer reduces every address to a normalized key (one canonical host per project, trailing slash stripped except on the root, fragments dropped, query strings sorted or stripped by rule) and merges rows that share a key into one page:
+  - The 200 response on the canonical host supplies the crawl data.
+  - Variants that redirect are recorded in `existing_redirects`.
+  - GA4 numbers take the highest value among the variants, not the sum, because the GA4 integration can attach the same path's numbers to several variants.
+  - The merged variant addresses are kept on the page so nothing is silently lost.
+- Redirect targets may be off-site (`admission.whittier.edu`, `wcpoets.com`) and are kept as-is.
+- **Non-HTML rows:** CSS, images, and documents come through the export even with those turned off in the crawl config. The importer filters by `Content Type`, so the crawl settings don't need to be perfect.
 - **Labels:** titles carry a site-wide suffix (" | Whittier College" on 67 of 69). Detect the most common suffix and store a cleaned `label` for the grid, tree, and prototype; keep the raw title.
 - **Current-nav flag:** `% of Total` splits cleanly into ~52-54% (linked from every page: header, footer, or utility nav) and ~0-2%. Pages above a threshold get `in_current_nav = true`, which shows the existing global navigation in the grid for free.
 - **Ignore:** H2s (the sample's H2-1/H2-2 are nav labels on every page), Last Modified (the server returns the crawl time, not the content date), GA4 Total revenue, and the semantic-similarity columns (they need an external AI provider).
@@ -186,7 +195,8 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
 **Screaming Frog settings for real crawls:** connect GA4 (and Search Console if available), turn on near-duplicates, add a Custom Extraction for breadcrumbs if the site has them, run Crawl Analysis before exporting, export "Internal: All".
 
 ### B. Content cleanup in the grid
-- Bulk-assign dispositions and status from a selection action bar.
+- Bulk-assign recommendations, decisions, and status from a selection action bar.
+- Views for "recommended but undecided" and "client overrode the recommendation".
 - Link picker for `redirect_to` and content targets: type-ahead search on title and URL.
 - Saved views: by section, by disposition, problems list, near-duplicate clusters sorted by traffic and inlinks (the strongest page is the natural absorber).
 
@@ -203,7 +213,7 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
 ### E. Exports
 - **Prototype zip**, built in memory, for manual S3 upload: `robots.txt` disallowing everything, `noindex` meta tags, filename with project and version (`clientname-sitemap-v3.zip`). No AWS credentials on the homelab.
 - **Redirect map**: every combine, split, and delete-with-target row as `old URL → final URL`, with chains resolved, including chains through `existing_redirects`.
-- **Content audit** as CSV or XLSX for the client. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
+- **Content audit** as CSV or XLSX for the client, in the same layout as the current hand-groomed sheet: Address, KWALL Reco, Final Decision, Notes, then the crawl and GA4 columns, with empty columns dropped. Cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so Excel doesn't run them as formulas.
 - **Markdown sitemap**, for the existing CLI.
 
 ### F. Tree testing (self-built, isolated)
@@ -232,7 +242,8 @@ Checked against a sample "Internal: All" export (79 rows, 81 columns, UTF-8, GA4
 - Is the prototype internal-only or client-presentable?
 - Is the Octopus-style page-thumbnail look essential, or is a clean tree enough?
 - Existing S3 bucket and CloudFront setup for client prototypes?
-- The hand-cleaned version of the sample crawl, to see which cleanup steps the importer should automate.
+- Does the client fill in "Final Decision" in the spreadsheet itself? If so, the app needs to import decisions back from the returned sheet, matched by URL.
+- What values go in "KWALL Reco" and "Final Decision" today: the five dispositions, or other wording?
 - Do PDFs and other documents belong in the client audit, or only HTML pages?
 - A domain on Cloudflare for the tunnel (needed by phase 5).
 - When the coworker joins, do they need their own login only, or also per-project permissions?
