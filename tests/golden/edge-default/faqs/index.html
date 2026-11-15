@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQs - prototype</title>
+<link rel="stylesheet" href="../style.css"><style>:root{--header-h:84px}</style>
+</head>
+<body>
+<div class="header-stack"><nav class="utilnav"><div class="util-item has-util-drop"><a href="../help/index.html">Help</a><ul class="util-drop"><li><a href="index.html">FAQs</a></li><li><a href="../admissions/contact-us/index.html">Contact Us</a></li></ul></div><a class="util-item" href="../login/index.html">Login</a></nav><header class="topbar">
+  <a class="brand" href="../index.html">SITEMAP PROTO</a>
+  <nav class="globalnav"><a class="" href="../admissions/index.html">Admissions</a><a class="" href="../academics/index.html">Academics</a><a class="" href="../campus-life-more/index.html">Campus &lt;Life&gt; &amp; &quot;More&quot;</a><a class="nav-btn" href="../give/index.html">Give</a><a class="" href="../apply/index.html">Apply</a></nav>
+  <button class="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+    <span></span><span></span><span></span>
+  </button>
+</header></div>
+<div class="page-banner">
+  <h1>FAQs</h1>
+</div>
+<div class="breadcrumb">FAQs</div>
+
+
+<main>
+  <section class="children leaf"><h2>Leaf page</h2><p>No sub-pages. This is a destination.</p></section>
+  <section class="content">
+    <div class="wire wire-title"></div><div class="wire wire-line"></div><div class="wire wire-line"></div><div class="wire wire-line"></div><div class="wire wire-line"></div><div class="wire wire-block"></div>
+  </section>
+</main>
+
+<footer><div class="footer-cols"><div class="footer-col"><h3>About</h3><ul><li><a href="../admissions/visit/index.html">Visit</a></li><li><a href="../admissions/contact-us/index.html">Contact Us</a></li><li><a href="../privacy-policy/index.html">Privacy Policy</a></li></ul></div><div class="footer-col"><h3>Study</h3><ul><li><a href="../academics/majors-minors/index.html">Majors &amp; Minors</a></li><li><a href="../admissions/apply/index.html">Apply</a></li></ul></div><div class="footer-col"><h3>Extra 1</h3><ul><li><a href="../campus-life-more/housing/index.html">Housing</a></li></ul></div><div class="footer-col"><h3>Extra 2</h3><ul><li><a href="../give/index.html">Give</a></li></ul></div></div><div class="footer-path"><code>faqs/index.html</code><a class="footer-sitemap-link" href="../sitemap.html">Visual sitemap</a></div></footer>
+<div class="mobile-menu" id="mobile-menu" aria-hidden="true">
+  <button class="mob-close" aria-label="Close menu">&#x2715;</button>
+  <nav class="mob-nav"><details><summary><a href="../admissions/index.html">Admissions</a></summary><div class="mob-child"><a href="../admissions/apply/index.html">Apply</a></div><div class="mob-child"><a href="../admissions/contact-us/index.html">Contact Us</a></div><div class="mob-child"><a href="../admissions/visit/index.html">Visit</a></div></details><details><summary><a href="../academics/index.html">Academics</a></summary><div class="mob-child"><a href="../academics/majors-minors/index.html">Majors &amp; Minors</a></div><div class="mob-child"><a href="../academics/contact-us/index.html">Contact Us</a></div></details><details><summary><a href="../campus-life-more/index.html">Campus &lt;Life&gt; &amp; &quot;More&quot;</a></summary><div class="mob-child"><a href="../campus-life-more/housing/index.html">Housing</a></div></details><a class="nav-btn" href="../give/index.html">Give</a><a href="../apply/index.html">Apply</a></nav><div class="mob-util-section"><details><summary><a href="../help/index.html">Help</a></summary><div class="mob-util-child"><a href="index.html">FAQs</a></div><div class="mob-util-child"><a href="../admissions/contact-us/index.html">Contact Us</a></div></details><a class="mob-util-link" href="../login/index.html">Login</a></div>
+</div>
+<div class="mobile-overlay" id="mobile-overlay"></div>
+<script>
+(function(){
+  var btn=document.querySelector('.hamburger');
+  var menu=document.getElementById('mobile-menu');
+  var overlay=document.getElementById('mobile-overlay');
+  function openMenu(){menu.classList.add('open');overlay.classList.add('open');document.body.classList.add('menu-open');btn.setAttribute('aria-expanded','true');menu.setAttribute('aria-hidden','false');}
+  function closeMenu(){menu.classList.remove('open');overlay.classList.remove('open');document.body.classList.remove('menu-open');btn.setAttribute('aria-expanded','false');menu.setAttribute('aria-hidden','true');}
+  btn.addEventListener('click',openMenu);
+  overlay.addEventListener('click',closeMenu);
+  document.querySelector('.mob-close').addEventListener('click',closeMenu);
+  function fixDrop(menu){
+    menu.classList.remove('drop-left');
+    var s=menu.style.cssText;
+    menu.style.cssText='display:block!important;visibility:hidden!important;pointer-events:none!important;';
+    var r=menu.getBoundingClientRect();
+    menu.style.cssText=s;
+    if(r.right>window.innerWidth-8)menu.classList.add('drop-left');
+  }
+  document.querySelectorAll('.nav-item').forEach(function(el){
+    var d=el.querySelector(':scope>.dropdown');
+    if(d)el.addEventListener('mouseenter',function(){fixDrop(d);});
+  });
+  document.querySelectorAll('.has-flyout').forEach(function(el){
+    var f=el.querySelector(':scope>.flyout');
+    if(f)el.addEventListener('mouseenter',function(){fixDrop(f);});
+  });
+})();
+</script>
+</body>
+</html>

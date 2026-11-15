@@ -16,3 +16,6 @@ sitemap.md
 *.xlsx
 *.db
 projects/
+
+# Local virtualenv
+.venv/
