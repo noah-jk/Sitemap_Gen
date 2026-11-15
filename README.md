@@ -185,12 +185,18 @@ app listens only there. `PROXY_IP` (the address Nginx Proxy Manager connects
 from, as shown in the app's request log) is optional; without it, failed-login
 limits count for all visitors together.
 
-- **Portainer:** Stacks → Add stack → Repository, point it at this repo and
-  `compose.yaml`, and set `LAN_IP` under Environment variables. Create the
-  first login from the container's Console:
+A GitHub Action tests every push and publishes the image to
+`ghcr.io/noah-jk/sitemap_gen`: `latest` from `main`, plus a tag per branch
+(slashes become hyphens) and per commit. The server only pulls it; nothing is
+built there.
+
+- **Portainer:** Stacks → Add stack, paste `compose.yaml` into the Web editor
+  (or use Repository mode), and set `LAN_IP` under Environment variables. To
+  run a branch build, also set `IMAGE_TAG` to the branch tag. Update with
+  **Pull and redeploy**. Create the first login from the container's Console:
   `python -m app.manage create-user noah`.
 - **Command line:** put `LAN_IP=...` in a `.env` file next to
-  `compose.yaml`, then `docker compose up -d --build` and
+  `compose.yaml`, then `docker compose pull && docker compose up -d` and
   `docker compose exec app python -m app.manage create-user noah`.
 
 The proxy host must use HTTPS: the login cookie is HTTPS-only. Data lives in

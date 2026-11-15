@@ -1,6 +1,8 @@
 services:
   app:
-    build: .
+    # Built and published by .github/workflows/image.yml. IMAGE_TAG picks a branch build;
+    # leave it unset for `latest` (the main branch).
+    image: ghcr.io/noah-jk/sitemap_gen:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       # Publish on the LAN address only, never 0.0.0.0. Set LAN_IP in .env or in Portainer's stack variables.
