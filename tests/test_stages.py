@@ -197,3 +197,23 @@ def test_more_below_note_on_parent_page():
     assert "Plus 392 more pages below this one" in files[news.out_path]
     assert "Plus 1 more page below this one" in files[events.out_path]
     assert "Leaf page" not in files[events.out_path]
+
+
+def test_separate_main_menu_with_overrides_and_headings():
+    site = sp.site_from_markdown("- Admissions\n  - How to Apply\n- About\n  - Contact Us\n- Landing Page\n")
+    admissions, about, landing = site.root.children
+    apply = admissions.children[0]
+    nav = sp.Node(title="")
+    apply_entry = sp.Node(title="Apply", parent=nav, out_path=apply.out_path, is_button=True)
+    group = sp.Node(title="Our College", parent=nav, out_path="")
+    group.children = [sp.Node(title="About", parent=group, out_path=about.out_path)]
+    nav.children = [apply_entry, group]
+    site.nav_root = nav
+    files = sp.render_site(site, sp.Settings(dropdown_depth=1))
+    page = files[apply.out_path]
+    assert '<a class="active nav-btn" href="index.html">Apply</a>' in page   # active on its own page
+    assert '<a class="">Our College</a>' in page                           # heading: no link
+    assert "Landing Page</a>" not in page.split('<nav class="globalnav">')[1].split("</nav>")[0]
+    assert "landing-page/index.html" in files                                # still a real page
+    contact = files[about.children[0].out_path]
+    assert '<a class="active">Our College</a>' not in contact and 'class="active"' not in contact.split("globalnav")[1][:400]
