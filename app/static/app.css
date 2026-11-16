@@ -153,3 +153,61 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
   animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+.segmented { display: inline-flex; }
+.segmented button { border-radius: 0 !important; }
+.segmented button:first-child { border-radius: 6px 0 0 6px !important; }
+.segmented button:last-child { border-radius: 0 6px 6px 0 !important; margin-left: -1px; }
+.segmented button[aria-pressed="true"] { background: var(--ink) !important; color: var(--paper) !important; border-color: var(--ink) !important; }
+
+.map[hidden] { display: none; }
+.map-home { display: inline-flex; align-items: baseline; gap: 6px; padding: 8px 14px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 8px; margin-left: 16px; position: relative; }
+.map-home::after { content: ""; position: absolute; left: 24px; top: 100%; height: 18px; border-left: 2px solid var(--line); }
+.map-board { overflow-x: auto; padding: 18px 0 16px; }
+.map-row { display: flex; gap: 16px; align-items: flex-start; width: max-content; padding: 18px 16px 0;
+  border-top: 2px solid var(--line); }
+.map-col { position: relative; width: 240px; flex: none; display: flex; flex-direction: column; gap: 8px; }
+.map-col::before { content: ""; position: absolute; top: -18px; left: 24px; height: 18px; border-left: 2px solid var(--line); }
+.map-card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.map-l1 { border-top: 4px solid var(--accent); }
+.map-l1 .map-label { font-weight: 700; font-size: 15px; }
+.map-l1 .map-count { font-size: 14px; }
+.map-l2 .map-label { font-weight: 600; }
+.map-l3 { padding: 5px 8px; font-size: 13px; background: var(--paper); }
+.map-list-l2 { display: flex; flex-direction: column; gap: 8px; margin-left: 12px; padding-left: 10px;
+  border-left: 2px solid var(--line); min-height: 28px; }
+.map-list-l3 { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; min-height: 4px; }
+.map-head { display: flex; align-items: flex-start; gap: 6px; }
+.map-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.map-grip { cursor: grab; color: var(--muted); user-select: none; }
+.map-meta { font-size: 12px; margin-top: 2px; }
+.map-count { font-weight: 600; }
+.map-tags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+.map-tags .tag { margin-left: 0; font-size: 10px; }
+.map-l3 .map-tags { display: none; }
+.map-empty { padding: 6px; border: 1px dashed var(--line); border-radius: 6px; text-align: center; }
+.map-menu { position: relative; }
+.map-menu summary { list-style: none; cursor: pointer; padding: 0 4px; color: var(--muted); border-radius: 4px; }
+.map-menu summary::-webkit-details-marker { display: none; }
+.map-menu summary:hover, .map-menu[open] summary { background: var(--paper); color: var(--ink); }
+.map-menu-items { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 180px; padding: 4px;
+  display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .15); }
+.map-menu-items .link { display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: 6px;
+  color: var(--ink); text-decoration: none; font-size: 13px; }
+.map-menu-items .link:hover, .map-menu-items .link:focus { background: var(--paper); }
+.map-add { margin: 14px 16px 0; }
+.map-dragging .map-list-l2 { padding-bottom: 36px; background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 0 8px 8px 0; }
+.map-dragging .map-list-l3 { min-height: 18px; border: 1px dashed var(--line); border-radius: 6px; padding: 2px; }
+.content.full { max-width: none; }
+.map-list-l3:empty { margin-top: 0; min-height: 0; }
+.map-dragging .map-list-l3:empty { margin-top: 6px; min-height: 18px; }
+.tree-row .muted { overflow-wrap: anywhere; min-width: 0; }
+.toolbar select { max-width: 100%; }
+@media (max-width: 640px) {
+  .tabs { order: 3; width: 100%; overflow-x: auto; align-self: auto; }
+  .tabs a { padding: 8px 10px; white-space: nowrap; }
+  label.inline { flex-wrap: wrap; }
+}
