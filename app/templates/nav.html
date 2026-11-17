@@ -6,9 +6,16 @@
 <h1>Navigation</h1>
 <p class="muted small">Menus are separate from the sitemap. They start empty and you add what belongs in them; pages
   that aren't in any menu still exist (landing pages, for example). Drag the ⠿ handle to reorder, nest, or move an entry
-  to another menu, or use ↑ ↓. <strong>Rename</strong> gives an entry a shorter label without changing the page.</p>
-<p id="nav-status" role="status" aria-live="polite" class="muted small"></p>
-<div class="menus">
+  to another menu, or use ↑ ↓. <strong>Rename</strong> gives an entry a shorter label without changing the page.
+  <strong>Map</strong> lays each menu out in columns, the way a mega menu shows it.</p>
+<div class="toolbar">
+  <span class="segmented" role="group" aria-label="View">
+    <button type="button" data-view="list" aria-pressed="true">List</button><button type="button" data-view="map" aria-pressed="false">Map</button>
+  </span>
+  <span id="nav-status" role="status" aria-live="polite" class="muted small"></span>
+</div>
+<div class="map nav-map" id="nav-map" hidden></div>
+<div class="menus" id="nav-lists">
   {% for key, name, levels in menus %}
   <section class="card menu-panel" data-menu="{{ key }}">
     <div class="menu-head">
@@ -48,6 +55,19 @@
     </div>
   </form>
 </dialog>
+<dialog id="move-entry-dialog" aria-labelledby="me-title">
+  <form id="me-form">
+    <h2 id="me-title"></h2>
+    <label>Move to <select id="me-dest"></select></label>
+    <p class="muted small" id="me-hint"></p>
+    <p class="error" id="me-error" role="alert"></p>
+    <div class="row end">
+      <button type="button" id="me-cancel">Cancel</button>
+      <button type="submit" class="primary">Move</button>
+    </div>
+  </form>
+</dialog>
 <script src="/static/vendor/Sortable.min.js"></script>
+<script src="/static/map-board.js"></script>
 <script src="/static/nav.js"></script>
 {% endblock %}
