@@ -211,3 +211,8 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
   .tabs a { padding: 8px 10px; white-space: nowrap; }
   label.inline { flex-wrap: wrap; }
 }
+
+/* Path column: link to the live page */
+.live-link { text-decoration: none; }
+.live-link:hover { text-decoration: underline; }
+.live-link::after { content: " ↗"; font-size: .8em; color: var(--muted); }

@@ -18,6 +18,19 @@
     return node;
   }
 
+  // The path links to the page on the live site, in a new tab. Only http(s) addresses from the
+  // crawl become links; a click on the link doesn't select the row.
+  function pathFormatter(cell) {
+    const path = cell.getValue();
+    if (!path) return el("span", {class: "muted", text: "(new page)"});
+    const url = cell.getData().current_url || "";
+    if (!/^https?:\/\//i.test(url)) return document.createTextNode(path);  // never a string: Tabulator would parse it as HTML
+    const a = el("a", {href: url, target: "_blank", rel: "noopener noreferrer", class: "live-link",
+      title: `Open ${url} in a new tab`, text: path});
+    a.addEventListener("click", (e) => e.stopPropagation());
+    return a;
+  }
+
   async function send(method, path, payload) {
     let resp;
     try {
@@ -157,7 +170,7 @@
        width: 40, frozen: true},
       {title: "", field: "problem", formatter: problemFormatter, width: 34, hozAlign: "center", headerSort: false},
       {title: "Label", field: "label", formatter: "plaintext", headerFilter: "input", minWidth: 200},
-      {title: "Path", field: "url_path", formatter: "plaintext", headerFilter: "input", minWidth: 200},
+      {title: "Path", field: "url_path", formatter: pathFormatter, headerFilter: "input", minWidth: 200},
       {title: "HTTP", field: "status_code", width: 72, hozAlign: "right"},
       {title: "Sessions", field: "sessions", width: 96, hozAlign: "right", formatter: "money",
        formatterParams: {precision: 0, thousand: ","}, headerSortStartingDir: "desc"},

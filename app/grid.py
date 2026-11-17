@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from app.rules import PROBLEMS_SQL
 
 FIELDS: Dict[str, str] = {
-    "id": "p.id", "label": "p.label", "url_path": "p.url_path", "status_code": "p.status_code",
+    "id": "p.id", "label": "p.label", "url_path": "p.url_path", "current_url": "p.current_url", "status_code": "p.status_code",
     "sessions": "p.sessions", "views": "p.views", "inlinks": "p.inlinks", "in_current_nav": "p.in_current_nav",
     "collection": "p.collection", "recommendation": "p.recommendation", "decision": "p.decision",
     "status": "p.status", "notes": "p.notes", "missing_from_crawl": "p.missing_from_crawl",

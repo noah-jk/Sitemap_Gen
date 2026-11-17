@@ -146,6 +146,7 @@ def test_grid_pages_sort_and_filter(imported):
     body = r.json()
     assert body["last_row"] == 15
     assert [p["url_path"] for p in body["data"]] == ["/", "/admissions", "/admissions/apply"]
+    assert body["data"][1]["current_url"].startswith("https://") and body["data"][1]["current_url"].endswith("/admissions")
     r = imported.get("/api/p/example/pages", params={"filter[0][field]": "label", "filter[0][value]": "contact"})
     assert r.json()["last_row"] == 2
     r = imported.get("/api/p/example/pages", params={"filter[0][field]": "recommendation", "filter[0][value]": "review"})
