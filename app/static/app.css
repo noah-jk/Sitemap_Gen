@@ -220,3 +220,27 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 /* Import: a note about something the crawl is missing */
 .notice { border-left: 4px solid var(--accent); background: var(--paper); padding: .5rem 1rem; margin: 1rem 0; border-radius: 4px; }
 .notice p, .notice ul { margin: .4rem 0; }
+
+/* Undo, redo, and the History list in the top bar */
+.history { margin-left: auto; display: flex; align-items: center; gap: 6px; position: relative; }
+.history + .logout { margin-left: 0; }
+.history button:disabled { opacity: .45; cursor: default; }
+.history-menu > summary { cursor: pointer; list-style: none; padding: 4px 8px; border-radius: 6px; color: var(--bar-ink); opacity: .85; }
+.history-menu > summary::-webkit-details-marker { display: none; }
+.history-menu > summary::after { content: " ▾"; font-size: .8em; }
+.history-menu[open] > summary { opacity: 1; background: rgba(255,255,255,.12); }
+.history-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 1000; width: min(380px, calc(100vw - 32px));
+  max-height: 60vh; overflow-y: auto; background: var(--card); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 10px 12px; }
+.history-panel > p { margin: 0 0 8px; }
+.history-list { list-style: none; margin: 0; padding: 0; }
+.history-list li { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line); }
+.history-list li:first-child { border-top: 0; }
+.history-label { overflow-wrap: anywhere; }
+.history-list li.undone .history-label { text-decoration: line-through; color: var(--muted); }
+.history-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 1100; max-width: calc(100vw - 32px);
+  background: var(--bar); color: var(--bar-ink); padding: 10px 16px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+.history-toast.error { background: var(--error); color: var(--paper); }
+@media (max-width: 640px) {
+  .history { margin-left: 0; }
+}

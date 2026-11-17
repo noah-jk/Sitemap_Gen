@@ -24,7 +24,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 
 import sitemap2proto as sp
-from app import auth, config, exports, grid, importer, nav, rules, tree
+from app import auth, config, exports, grid, history, importer, nav, rules, tree
 from app.db import DISPOSITIONS, SLUG_RE, Store, now_ms
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -173,6 +173,19 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             raise NotLoggedIn()
         return uid
 
+    def user_name(request: Request) -> str:
+        name = request.session.get("name")
+        if not name:
+            with closing(store.registry()) as reg:
+                row = reg.execute("SELECT username FROM users WHERE id = ?", (request.session.get("uid"),)).fetchone()
+            name = row["username"] if row else "someone"
+            request.session["name"] = name
+        return name
+
+    def recorded(request: Request, conn, label: str):
+        """Record the writes made in the block as one undoable action."""
+        return history.record(conn, user_name(request), label[:300])
+
     def open_project(slug: str):
         try:
             return store.project(slug)
@@ -205,7 +218,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             return render(request, "login.html", status_code=401, error="Wrong username or password.")
         limiter.reset(client)
         request.session.clear()
-        request.session.update(uid=uid, login_at=now_ms(), csrf=secrets.token_urlsafe(32))
+        request.session.update(uid=uid, name=username, login_at=now_ms(), csrf=secrets.token_urlsafe(32))
         return RedirectResponse("/", status_code=303)
 
     @app.post("/logout")
@@ -368,7 +381,8 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         check_csrf(request, request.headers.get("X-CSRF-Token"))
         with closing(open_project(slug)) as conn:
             try:
-                _, warning = rules.apply_changes(conn, page_id, edit.changes, edit.updated_at)
+                with recorded(request, conn, history.describe_change(conn, page_id, edit.changes)):
+                    _, warning = rules.apply_changes(conn, page_id, edit.changes, edit.updated_at)
             except KeyError:
                 raise HTTPException(404, "That page no longer exists.")
             except rules.Conflict:
@@ -390,8 +404,11 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 ids = grid.matching_ids(conn, filters, bulk.match.get("view"))
             else:
                 ids = bulk.ids or []
+            label = history.describe_bulk(conn, bulk.changes)
             try:
-                count, warning = rules.bulk_apply(conn, ids, bulk.changes)
+                with recorded(request, conn, label.replace("{count}", "pages")) as rec:
+                    count, warning = rules.bulk_apply(conn, ids, bulk.changes)
+                    rec.label = label.replace("{count}", f"{count} page{'' if count == 1 else 's'}")
             except rules.RuleError as e:
                 return JSONResponse({"detail": str(e)}, status_code=400)
         warm(slug)
@@ -465,12 +482,18 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         tag(roots)
         return {"roots": roots}
 
-    def tree_write(request: Request, slug: str, action):
+    def tree_write(request: Request, slug: str, action, describe):
+        """`describe(conn)` names the edit before it happens; "{added}" in it becomes the count added."""
         require_user(request)
         check_csrf(request, request.headers.get("X-CSRF-Token"))
         with closing(open_project(slug)) as conn:
             try:
-                result = action(conn)
+                label = describe(conn)
+                with recorded(request, conn, label.replace("{added}", "entries")) as rec:
+                    result = action(conn)
+                    if isinstance(result, dict) and "added" in result:
+                        n = result["added"]
+                        rec.label = label.replace("{added}", f"{n} entr{'y' if n == 1 else 'ies'}")
                 warm(slug)
                 return result
             except KeyError:
@@ -480,15 +503,18 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
 
     @app.post("/api/p/{slug}/tree/move")
     def tree_move(request: Request, slug: str, move: Move):
-        return tree_write(request, slug, lambda conn: tree.move(conn, move.id, move.parent_id, move.index) or {"ok": True})
+        return tree_write(request, slug, lambda conn: tree.move(conn, move.id, move.parent_id, move.index) or {"ok": True},
+                          lambda conn: f'Moved "{history.page_label(conn, move.id)}"')
 
     @app.post("/api/p/{slug}/tree/pages")
     def tree_add(request: Request, slug: str, page: NewPage):
-        return tree_write(request, slug, lambda conn: {"id": tree.create_page(conn, page.label, page.parent_id)})
+        return tree_write(request, slug, lambda conn: {"id": tree.create_page(conn, page.label, page.parent_id)},
+                          lambda conn: f'Added page "{" ".join(page.label.split())}"')
 
     @app.delete("/api/p/{slug}/tree/pages/{page_id}")
     def tree_delete(request: Request, slug: str, page_id: int):
-        return tree_write(request, slug, lambda conn: tree.delete_new_page(conn, page_id) or {"ok": True})
+        return tree_write(request, slug, lambda conn: tree.delete_new_page(conn, page_id) or {"ok": True},
+                          lambda conn: f'Deleted page "{history.page_label(conn, page_id)}"')
 
     # ---- navigation (menus) ------------------------------------------------
 
@@ -516,30 +542,73 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 raise rules.RuleError(["No pages chosen."])
             depth = max(0, min(body.subpage_depth, 3))
             return {"added": nav.add_pages(conn, body.menu, body.parent_id, ids, depth)}
-        return tree_write(request, slug, run)
+        return tree_write(request, slug, run,
+                          lambda conn: f"Added {{added}} to the {history.MENU_NAMES.get(body.menu, 'menu')}")
 
     @app.post("/api/p/{slug}/nav/{item_id}/subpages")
     def nav_subpages(request: Request, slug: str, item_id: int, body: SubPages):
         depth = max(1, min(body.depth, 3))
-        return tree_write(request, slug, lambda conn: {"added": nav.add_subpages(conn, item_id, depth)})
+        return tree_write(request, slug, lambda conn: {"added": nav.add_subpages(conn, item_id, depth)},
+                          lambda conn: f'Added {{added}} under "{history.entry_label(conn, item_id)[0]}"')
 
     @app.post("/api/p/{slug}/nav/headings")
     def nav_add_heading(request: Request, slug: str, body: NavHeading):
-        return tree_write(request, slug, lambda conn: {"id": nav.add_heading(conn, body.menu, body.parent_id, body.label)})
+        return tree_write(request, slug, lambda conn: {"id": nav.add_heading(conn, body.menu, body.parent_id, body.label)},
+                          lambda conn: f'Added heading "{" ".join(body.label.split())}" to the '
+                                       f'{history.MENU_NAMES.get(body.menu, "menu")}')
 
     @app.post("/api/p/{slug}/nav/move")
     def nav_move(request: Request, slug: str, body: NavMove):
         return tree_write(request, slug,
-                          lambda conn: nav.move(conn, body.id, body.menu, body.parent_id, body.index) or {"ok": True})
+                          lambda conn: nav.move(conn, body.id, body.menu, body.parent_id, body.index) or {"ok": True},
+                          lambda conn: 'Moved "{}" in the {}'.format(*history.entry_label(conn, body.id)))
 
     @app.patch("/api/p/{slug}/nav/{item_id}")
     def nav_edit(request: Request, slug: str, item_id: int, body: NavEdit):
         return tree_write(request, slug,
-                          lambda conn: nav.update(conn, item_id, body.label, body.is_button) or {"ok": True})
+                          lambda conn: nav.update(conn, item_id, body.label, body.is_button) or {"ok": True},
+                          lambda conn: describe_entry_edit(conn, item_id, body))
 
     @app.delete("/api/p/{slug}/nav/{item_id}")
     def nav_remove(request: Request, slug: str, item_id: int):
-        return tree_write(request, slug, lambda conn: nav.remove(conn, item_id) or {"ok": True})
+        return tree_write(request, slug, lambda conn: nav.remove(conn, item_id) or {"ok": True},
+                          lambda conn: 'Removed "{}" from the {}'.format(*history.entry_label(conn, item_id)))
+
+    def describe_entry_edit(conn, item_id: int, body) -> str:
+        name, menu = history.entry_label(conn, item_id)
+        if body.label is not None:
+            new = " ".join(body.label.split())
+            return f'Renamed "{name}" in the {menu} to "{new}"' if new else f'Reset the name of "{name}" in the {menu}'
+        return f'Made "{name}" a button' if body.is_button else f'Made "{name}" a plain link'
+
+    # ---- history (undo / redo) -----------------------------------------------
+
+    @app.get("/api/p/{slug}/history")
+    def history_api(request: Request, slug: str):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            return history.recent(conn)
+
+    def history_step(request: Request, slug: str, step):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        with closing(open_project(slug)) as conn:
+            try:
+                label = step(conn)
+            except history.NothingToDo as e:
+                return JSONResponse({"detail": str(e)}, status_code=400)
+            except history.Stale as e:
+                return JSONResponse({"detail": str(e)}, status_code=409)
+            warm(slug)
+            return {"label": label, **history.recent(conn)}
+
+    @app.post("/api/p/{slug}/history/undo")
+    def history_undo(request: Request, slug: str):
+        return history_step(request, slug, history.undo)
+
+    @app.post("/api/p/{slug}/history/redo")
+    def history_redo(request: Request, slug: str):
+        return history_step(request, slug, history.redo)
 
     # ---- prototype ---------------------------------------------------------
 
@@ -602,7 +671,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             sp.Settings(nav_style=nav_style, dropdown_depth=depth, mega_menu=mega)
         except ValueError as e:
             return RedirectResponse(f"/p/{slug}/prototype?error={quote(str(e))}", status_code=303)
-        with closing(open_project(slug)) as conn:
+        with closing(open_project(slug)) as conn, recorded(request, conn, "Changed the prototype settings"):
             conn.execute(
                 "UPDATE settings SET nav_style = ?, dropdown_depth = ?, mega_menu = ?, sticky_header = ?, "
                 "max_depth = ?, version_label = ?",

@@ -209,6 +209,14 @@ in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has
 a `noindex` tag on every page and a `robots.txt` that blocks search engines,
 ready to upload to S3.
 
+**Undo** and **Redo** sit in the top bar on every project tab (also Ctrl/⌘+Z
+and Ctrl/⌘+Shift+Z). Every edit, whether in the grid, a bulk edit, a sitemap
+move, a menu change, or prototype settings, is one step, so a bulk edit of
+1,500 pages comes back with one click. **History** lists recent edits with who
+made them. Undo goes back one edit at a time, newest first, and the last 200
+are kept per project. Imports aren't part of it, and undoing an edit only puts
+back what the person changed, never older crawl numbers.
+
 The **Exports** tab has the redirect map (only pages with a Final Decision;
 old redirects that would chain through a removed page are re-pointed), the
 content audit CSV, and a Markdown sitemap that `sitemap2proto.py` can read.
