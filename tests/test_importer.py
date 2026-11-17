@@ -179,3 +179,30 @@ def test_error_url_classification(path, kind):
 ])
 def test_page_key(url, key):
     assert importer.page_key(url, {"example.edu", "www.example.edu"}) == key
+
+
+def test_import_notes_watched_columns_the_crawl_left_empty(conn):
+    # Like the real Whittier export, the fixture has no word counts or near duplicates.
+    s = run(conn)
+    assert s.empty_columns == ["Word Count", "No. Near Duplicates"]
+    stored = json.loads(conn.execute("SELECT summary FROM imports").fetchone()[0])
+    assert stored["empty_columns"] == ["Word Count", "No. Near Duplicates"]
+
+
+def test_short_pages_view_uses_word_count(conn):
+    from app import grid
+    u = "https://www.example.edu"
+    s = run(conn, edit_fixture(change={
+        f"{u}/admissions/contact": {"Word Count": "45"},       # short: shows up
+        f"{u}/about/history": {"Word Count": "199"},           # just under the cut-off
+        f"{u}/campus-life": {"Word Count": "200"},             # at the cut-off: not short
+        f"{u}/news/story-two": {"Word Count": "30"},           # news posts are short by nature: left out
+        f"{u}/about/contact": {"Word Count": "12"},            # short, but already being combined: left out
+    }))
+    assert s.empty_columns == ["No. Near Duplicates"]
+    by_path = pages(conn)
+    assert by_path["/admissions/contact"]["word_count"] == 45
+    conn.execute("UPDATE pages SET decision = 'combine' WHERE url_path = '/about/contact'")
+    short = {conn.execute("SELECT url_path FROM pages WHERE id = ?", (i,)).fetchone()[0]
+             for i in grid.matching_ids(conn, [], "short")}
+    assert short == {"/admissions/contact", "/about/history"}

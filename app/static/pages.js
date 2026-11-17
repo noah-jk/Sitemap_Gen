@@ -175,6 +175,8 @@
       {title: "Sessions", field: "sessions", width: 96, hozAlign: "right", formatter: "money",
        formatterParams: {precision: 0, thousand: ","}, headerSortStartingDir: "desc"},
       {title: "Inlinks", field: "inlinks", width: 84, hozAlign: "right", headerSortStartingDir: "desc"},
+      {title: "Words", field: "word_count", width: 80, hozAlign: "right",
+       headerTooltip: "Screaming Frog's word count for the page's main content"},
       {title: "In current nav", field: "in_current_nav", width: 82, hozAlign: "center", formatter: "tickCross",
        formatterParams: {crossElement: false}},
       {title: "Collection", field: "collection", width: 104, formatter: "plaintext", headerFilter: "input"},

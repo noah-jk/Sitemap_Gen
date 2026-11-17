@@ -258,6 +258,12 @@ traffic across hosts, records existing redirects, and lists problems on the
 live site (malformed links, the whole site answering on two hosts) under
 "Site issues" on the Import tab.
 
+Turn on **Word Count** in Screaming Frog (Configuration → Spider → Extraction)
+to fill the grid's Words column and the "Short pages" view: kept pages under
+200 words (Screaming Frog's own low-content cut-off), news and event items left
+out, which are good candidates to combine. The Import tab says when a crawl
+left Word Count or near duplicates empty.
+
 ## Tests
 
 ```sh
