@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Sitemap Gen{% endblock %}</title>
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
 {% block head %}{% endblock %}
 </head>
 <body{% block body_attrs %}{% endblock %}>
@@ -32,6 +33,7 @@
     </details>
   </div>
   {% endif %}
+  <button type="button" id="theme-btn" class="theme-btn">☀☾ Auto</button>
   {% if user %}
   <form class="logout" method="post" action="/logout">
     <input type="hidden" name="csrf" value="{{ csrf }}">

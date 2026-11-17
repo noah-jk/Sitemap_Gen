@@ -1,12 +1,25 @@
+/* Colors. Light by default; dark when the browser prefers it, unless the theme switch says otherwise
+   (theme.js sets data-theme on <html> to "light" or "dark", or leaves it unset for Auto). */
 :root {
   --ink: #1d2430; --muted: #66748a; --line: #d5dbe4; --paper: #f4f6f9; --card: #ffffff;
-  --accent: #2f5fff; --accent-ink: #ffffff; --bar: #1d2430; --bar-ink: #e8ecf3; --error: #b42318;
+  --accent: #2f5fff; --accent-ink: #ffffff; --bar: #1d2430; --bar-ink: #e8ecf3; --error: #b42318; --error-ink: #ffffff;
+  --head: #eef1f5; --stripe: #f8f9fb; --hover: #e7ecf5; --selected: #dbe5ff; --selected-hover: #c8d6ff;
+  --ok: #1a7f37; --warn: #b8860b; --shadow: rgba(16, 24, 40, .16);
   color-scheme: light;
 }
+:root[data-theme="dark"] {
+  --ink: #e6e9ef; --muted: #98a3b5; --line: #2e3646; --paper: #12161d; --card: #1a1f29;
+  --accent: #6b8cff; --accent-ink: #0b0f16; --bar: #0b0e13; --bar-ink: #e6e9ef; --error: #ff8a80; --error-ink: #12161d;
+  --head: #212834; --stripe: #1e232e; --hover: #283041; --selected: #23366a; --selected-hover: #2b4280;
+  --ok: #56d364; --warn: #d4a72c; --shadow: rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ink: #e6e9ef; --muted: #98a3b5; --line: #2e3646; --paper: #12161d; --card: #1a1f29;
-    --accent: #6b8cff; --accent-ink: #0b0f16; --bar: #0b0e13; --bar-ink: #e6e9ef; --error: #ff8a80;
+    --accent: #6b8cff; --accent-ink: #0b0f16; --bar: #0b0e13; --bar-ink: #e6e9ef; --error: #ff8a80; --error-ink: #12161d;
+    --head: #212834; --stripe: #1e232e; --hover: #283041; --selected: #23366a; --selected-hover: #2b4280;
+    --ok: #56d364; --warn: #d4a72c; --shadow: rgba(0, 0, 0, .5);
     color-scheme: dark;
   }
 }
@@ -74,10 +87,10 @@ label.check { flex-direction: row; align-items: center; gap: 6px; font-weight: 4
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 4px 0 8px; }
 .toolbar #grid-status { color: var(--muted); }
 .bulk-bar { border-top: 1px solid var(--line); padding-top: 8px; font-size: 13px; }
-.badge { background: var(--error); color: #fff; border: 0; border-radius: 999px; padding: 3px 10px; font-weight: 700;
+.badge { background: var(--error); color: var(--error-ink); border: 0; border-radius: 999px; padding: 3px 10px; font-weight: 700;
   cursor: pointer; font-size: 12px; }
 .problem-flag { display: inline-block; width: 18px; height: 18px; line-height: 18px; border-radius: 50%;
-  background: var(--error); color: #fff; font-weight: 700; font-size: 12px; text-align: center; cursor: help; }
+  background: var(--error); color: var(--error-ink); font-weight: 700; font-size: 12px; text-align: center; cursor: help; }
 .target .muted { font-size: 12px; }
 .row.end { justify-content: flex-end; }
 
@@ -100,7 +113,7 @@ dialog p { margin: 0; }
 .chosen { font-size: 14px; }
 
 .content.wide { max-width: 1200px; }
-.ok { color: #1a7f37; font-weight: 600; }
+.ok { color: var(--ok); font-weight: 600; }
 textarea { font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; padding: 7px 9px; border: 1px solid var(--line);
   border-radius: 6px; background: var(--card); color: var(--ink); resize: vertical; }
 fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0;
@@ -134,7 +147,7 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
   .proto-page { grid-template-columns: 1fr; }
   .tree-actions { margin-left: 30px; opacity: 1; flex-wrap: wrap; }
 }
-.warn { border-left: 3px solid #b8860b; padding: 6px 10px; background: var(--paper); }
+.warn { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--paper); }
 
 .menus { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .menu-panel { margin: 0; }
@@ -193,7 +206,7 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .map-menu summary:hover, .map-menu[open] summary { background: var(--paper); color: var(--ink); }
 .map-menu-items { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 180px; padding: 4px;
   display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .15); }
+  box-shadow: 0 6px 18px var(--shadow); }
 .map-menu-items .link { display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: 6px;
   color: var(--ink); text-decoration: none; font-size: 13px; }
 .map-menu-items .link:hover, .map-menu-items .link:focus { background: var(--paper); }
@@ -231,7 +244,7 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .history-menu[open] > summary { opacity: 1; background: rgba(255,255,255,.12); }
 .history-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 1000; width: min(380px, calc(100vw - 32px));
   max-height: 60vh; overflow-y: auto; background: var(--card); color: var(--ink); border: 1px solid var(--line);
-  border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 10px 12px; }
+  border-radius: 10px; box-shadow: 0 8px 24px var(--shadow); padding: 10px 12px; }
 .history-panel > p { margin: 0 0 8px; }
 .history-list { list-style: none; margin: 0; padding: 0; }
 .history-list li { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line); }
@@ -243,4 +256,11 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .history-toast.error { background: var(--error); color: var(--paper); }
 @media (max-width: 640px) {
   .history { margin-left: 0; }
+}
+
+/* Theme switch in the top bar: pushed right on pages without the history buttons */
+.theme-btn { white-space: nowrap; margin-left: auto; }
+.history + .theme-btn, .theme-btn + .logout { margin-left: 0; }
+@media (max-width: 640px) {
+  .theme-btn { margin-left: 0; }
 }
