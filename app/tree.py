@@ -1,4 +1,5 @@
 """The to-be navigation: kept pages nested by parent_id, edits to it, and prototypes built from it."""
+import hashlib
 import json
 import re
 import sqlite3
@@ -244,8 +245,21 @@ def render_files(conn: sqlite3.Connection) -> Dict[str, str]:
     return sp.render_site(site, settings)
 
 
-def stamp(conn: sqlite3.Connection) -> tuple:
-    """Changes whenever anything that affects the prototype changes."""
-    from app import nav
-    pages = tuple(conn.execute("SELECT count(*), max(updated_at), total(sort_order) FROM pages").fetchone())
-    return pages + tuple(settings_row(conn)) + nav.stamp(conn)
+# What the prototype is built from. Notes, status, redirects, and crawl numbers aren't in it, so
+# auditing in the grid doesn't make the prototype rebuild.
+STAMP_SQL = (
+    "SELECT id, parent_id, label, sort_order, is_new, page_type, collection, status_code, "
+    "COALESCE(decision, recommendation) FROM pages ORDER BY id",
+    "SELECT id, menu, parent_id, page_id, label, sort_order, is_button FROM nav_items ORDER BY id",
+    "SELECT * FROM settings",
+)
+
+
+def stamp(conn: sqlite3.Connection) -> str:
+    """Changes whenever anything the prototype shows changes (and only then)."""
+    h = hashlib.blake2b(digest_size=16)
+    for sql in STAMP_SQL:
+        for row in conn.execute(sql):
+            h.update(repr(tuple(row)).encode())
+        h.update(b"\x00")
+    return h.hexdigest()

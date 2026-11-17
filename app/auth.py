@@ -11,12 +11,23 @@ from typing import Optional
 
 from app.db import Store, now_ms
 
-N, R, P = 2 ** 14, 8, 1
+# OWASP's scrypt settings equivalent to N=2^17: the same 16 MiB of memory per check as before,
+# five times the work. Hashes made with older settings are upgraded at the next successful login.
+N, R, P = 2 ** 14, 8, 5
+MAX_N, MAX_R, MAX_P = 2 ** 17, 16, 16  # refuse stored settings that would cost more than this
+
+# At most two password checks run at once, so a burst of login attempts can't exhaust CPU or memory.
+_checks = threading.BoundedSemaphore(2)
+
+
+def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, dklen: int) -> bytes:
+    with _checks:
+        return hashlib.scrypt(password.encode(), salt=salt, n=n, r=r, p=p, dklen=dklen, maxmem=256 * 1024 * 1024)
 
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode(), salt=salt, n=N, r=R, p=P, dklen=32)
+    digest = _scrypt(password, salt, N, R, P, 32)
     b64 = lambda b: base64.b64encode(b).decode()
     return f"scrypt${N}${R}${P}${b64(salt)}${b64(digest)}"
 
@@ -24,12 +35,18 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, stored: str) -> bool:
     try:
         _, n, r, p, salt, digest = stored.split("$")
+        n, r, p = int(n), int(r), int(p)
+        if n > MAX_N or r > MAX_R or p > MAX_P:
+            return False
         expected = base64.b64decode(digest)
-        got = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt),
-                             n=int(n), r=int(r), p=int(p), dklen=len(expected))
+        got = _scrypt(password, base64.b64decode(salt), n, r, p, len(expected))
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(got, expected)
+
+
+def needs_rehash(stored: str) -> bool:
+    return not stored.startswith(f"scrypt${N}${R}${P}$")
 
 
 # Verifying against this when the username doesn't exist keeps response times equal.
@@ -71,7 +88,12 @@ def authenticate(store: Store, username: str, password: str) -> Optional[int]:
     if row is None:
         verify_password(password, _DUMMY_HASH)
         return None
-    return row["id"] if verify_password(password, row["password_hash"]) else None
+    if not verify_password(password, row["password_hash"]):
+        return None
+    if needs_rehash(row["password_hash"]):  # same password, current settings; sessions stay valid
+        with closing(store.registry()) as reg:
+            reg.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password), row["id"]))
+    return row["id"]
 
 
 def session_valid(store: Store, user_id: int, logged_in_at: int) -> bool:
@@ -89,17 +111,28 @@ class LoginLimiter:
         self._fails = defaultdict(deque)
         self._lock = threading.Lock()
 
+    def _trim(self, client: str, now: float) -> int:
+        q = self._fails.get(client)
+        if q is None:
+            return 0
+        while q and q[0] < now - self.window:
+            q.popleft()
+        if not q:
+            del self._fails[client]  # nothing kept for clients with no recent failures
+            return 0
+        return len(q)
+
     def blocked(self, client: str) -> bool:
         with self._lock:
-            q = self._fails[client]
-            cutoff = time.monotonic() - self.window
-            while q and q[0] < cutoff:
-                q.popleft()
-            return len(q) >= self.limit
+            return self._trim(client, time.monotonic()) >= self.limit
 
     def failed(self, client: str) -> None:
         with self._lock:
-            self._fails[client].append(time.monotonic())
+            now = time.monotonic()
+            if len(self._fails) > 1000:  # many different clients: drop the ones that have gone quiet
+                for c in list(self._fails):
+                    self._trim(c, now)
+            self._fails[client].append(now)
 
     def reset(self, client: str) -> None:
         with self._lock:

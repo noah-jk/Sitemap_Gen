@@ -1,5 +1,8 @@
-fastapi==0.115.12
-uvicorn==0.34.2
+fastapi==0.163.1
+# Pinned on its own so security fixes don't wait on FastAPI's range: 1.3.1+ fixes the Range-header,
+# multipart, and request.url advisories that affected 0.46.x.
+starlette==1.10.0
+uvicorn==0.54.0
 jinja2==3.1.6
-python-multipart==0.0.20
+python-multipart==0.0.34
 itsdangerous==2.2.0
