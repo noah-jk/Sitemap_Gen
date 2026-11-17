@@ -1,0 +1,40 @@
+/* The Pages grid in the app's colors (light and dark). Loaded after tabulator.min.css, which it overrides. */
+.tabulator { background-color: var(--card); border-color: var(--line); color: var(--ink); }
+.tabulator .tabulator-header { background-color: var(--head); border-bottom-color: var(--line); color: var(--ink); }
+.tabulator .tabulator-header .tabulator-col { background: var(--head); border-right-color: var(--line); }
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable.tabulator-col-sorter-element:hover { background-color: var(--hover); }
+.tabulator .tabulator-header .tabulator-col.tabulator-moving { background: var(--hover); border-color: var(--line); }
+.tabulator .tabulator-header .tabulator-frozen.tabulator-frozen-left { border-right-color: var(--line); }
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort=none] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow { border-bottom-color: var(--line); }
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort=ascending] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow { border-bottom-color: var(--accent); }
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort=descending] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow { border-top-color: var(--accent); }
+.tabulator .tabulator-tableholder { background-color: var(--card); }
+.tabulator .tabulator-tableholder .tabulator-table { background-color: var(--card); color: var(--ink); }
+.tabulator .tabulator-tableholder .tabulator-placeholder .tabulator-placeholder-contents { color: var(--muted); }
+.tabulator-row { background-color: var(--card); }
+.tabulator-row.tabulator-row-even { background-color: var(--stripe); }
+.tabulator-row.tabulator-selectable:hover { background-color: var(--hover); }
+.tabulator-row.tabulator-selected { background-color: var(--selected); }
+.tabulator-row.tabulator-selected:hover { background-color: var(--selected-hover); }
+.tabulator-row .tabulator-cell { border-right-color: var(--line); }
+.tabulator-row .tabulator-cell.tabulator-frozen.tabulator-frozen-left { border-right-color: var(--line); }
+.tabulator-row .tabulator-cell.tabulator-editing { border-color: var(--accent); }
+.tabulator-row .tabulator-cell.tabulator-validation-fail { border-color: var(--error); }
+.tabulator .tabulator-footer { background-color: var(--head); border-top-color: var(--line); color: var(--ink); }
+.tabulator .tabulator-footer .tabulator-paginator { color: var(--muted); }
+.tabulator .tabulator-footer .tabulator-page,
+.tabulator .tabulator-footer .tabulator-page-size { background: var(--card); border-color: var(--line); color: var(--ink); }
+.tabulator .tabulator-footer .tabulator-page.active { color: var(--accent); border-color: var(--accent); font-weight: 700; }
+.tabulator .tabulator-footer .tabulator-page:not(disabled):hover { background: var(--hover); color: var(--ink); }
+.tabulator .tabulator-col-resize-guide, .tabulator .tabulator-row-resize-guide { background-color: var(--muted); }
+.tabulator .tabulator-alert { background: rgba(0, 0, 0, .4); }
+.tabulator .tabulator-alert .tabulator-alert-msg { background: var(--card); color: var(--ink); }
+.tabulator .tabulator-alert .tabulator-alert-msg.tabulator-alert-state-msg { border-color: var(--line); color: var(--ink); }
+.tabulator-popup-container { background: var(--card); border-color: var(--line); color: var(--ink); box-shadow: 0 6px 18px var(--shadow); }
+.tabulator-menu .tabulator-menu-item:not(.tabulator-menu-item-disabled):hover { background: var(--hover); }
+.tabulator-edit-list .tabulator-edit-list-item,
+.tabulator-edit-list .tabulator-edit-list-placeholder { color: var(--ink); }
+.tabulator-edit-list .tabulator-edit-list-item.active,
+.tabulator-edit-list .tabulator-edit-list-item:hover { background: var(--accent); color: var(--accent-ink); }
+.tabulator-edit-list .tabulator-edit-list-item.focused { outline-color: var(--accent); }
+.tabulator-row .tabulator-cell input, .tabulator-row .tabulator-cell select, .tabulator-row .tabulator-cell textarea { color: var(--ink); background: var(--card); }

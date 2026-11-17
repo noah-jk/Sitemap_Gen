@@ -217,6 +217,10 @@ made them. Undo goes back one edit at a time, newest first, and the last 200
 are kept per project. Imports aren't part of it, and undoing an edit only puts
 back what the person changed, never older crawl numbers.
 
+The app has a light and a dark theme. It follows the device by default, and
+the switch in the top bar (Auto, Light, Dark) overrides that per browser. The
+prototype keeps its own look either way.
+
 The **Exports** tab has the redirect map (only pages with a Final Decision;
 old redirects that would chain through a removed page are re-pointed), the
 content audit CSV, and a Markdown sitemap that `sitemap2proto.py` can read.
