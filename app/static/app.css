@@ -356,3 +356,7 @@ select.tag-select { margin-left: 6px; padding: 1px 4px; font-size: 12px; }
 .inline-editable { cursor: text; }
 .inline-editable:hover { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
 input.inline-input { padding: 2px 6px; font-weight: 600; max-width: 100%; }
+.history-toast { display: flex; align-items: center; gap: 14px; }
+.history-toast[hidden] { display: none; }
+button.toast-undo { padding: 3px 12px !important; background: transparent !important; color: var(--bar-ink) !important;
+  border: 1px solid currentColor !important; font-weight: 600; }

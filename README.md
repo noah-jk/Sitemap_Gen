@@ -233,7 +233,9 @@ and Ctrl/⌘+Shift+Z). Every edit, whether in the grid, a bulk edit, a sitemap
 move, a menu change, or prototype settings, is one step, so a bulk edit of
 1,500 pages comes back with one click. **History** lists recent edits with who
 made them. Undo goes back one edit at a time, newest first, and the last 200
-are kept per project. Imports aren't part of it, and undoing an edit only puts
+are kept per project. Because of that, removing menu entries or new pages and
+bulk edits don't ask first: they happen at once, and the message that says so
+has its own Undo button. Imports aren't part of it, and undoing an edit only puts
 back what the person changed, never older crawl numbers.
 
 The app has a light and a dark theme. It follows the device by default, and

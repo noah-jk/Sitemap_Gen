@@ -407,7 +407,6 @@
     const ids = table.getSelectedData().map((r) => r.id);
     if (!all && !ids.length) { status.textContent = "Select some rows first, or tick “use all matching pages”."; return; }
     const field = $("bulk-field").value;
-    const fieldName = $("bulk-field").selectedOptions[0].textContent;
     const value = bulkValue.value;
     const count = all ? lastTotal : ids.length;
     const target = all
@@ -419,7 +418,9 @@
       if (!r.ok) { status.textContent = r.data.detail || `Not saved (${r.status}).`; return; }
       table.deselectRow();
       $("bulk-all").checked = false;
-      status.textContent = `Updated ${r.data.count} page${r.data.count === 1 ? "" : "s"}. ${r.data.warning || ""}`;
+      const done = `Updated ${r.data.count.toLocaleString()} page${r.data.count === 1 ? "" : "s"}.`;
+      status.textContent = `${done} ${r.data.warning || ""}`;
+      if (window.AppHistory) AppHistory.done(done);
       table.setPage(table.getPage());
     };
 
@@ -430,6 +431,7 @@
           table.deselectRow();
           $("bulk-all").checked = false;
           status.textContent = `Added ${added} entr${added === 1 ? "y" : "ies"} to the ${menuName}.`;
+          if (added && window.AppHistory) AppHistory.done(status.textContent);
           table.setPage(table.getPage());
         }});
       return;
@@ -441,7 +443,6 @@
       return;
     }
     if (field === "parent_id") {
-      if (count > 25 && !window.confirm(`Move ${pages} to the top level?`)) return;
       run({parent_id: null});
       return;
     }
@@ -450,7 +451,6 @@
         onSave: (redirectTo) => run({[field]: "combine", redirect_to: redirectTo})});
       return;
     }
-    if (count > 25 && !window.confirm(`Set ${fieldName} to “${value || "(clear)"}” on ${count.toLocaleString()} pages?`)) return;
     run({[field]: value || null});
   });
 

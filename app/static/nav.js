@@ -61,10 +61,9 @@
     }
     if (menu === "main") out.push(["Add heading", `Add a heading under ${item.display}`, () => addHeading(menu, item.id)]);
     out.push(["Rename", `Rename ${item.display} (or double-click its name)`, () => InlineEdit.startFor(item.id)]);
-    out.push(["Remove", `Remove ${item.display} from this menu`, () => {
-      if (window.confirm(`Remove “${item.display}” from this menu? The page itself isn't affected.`)) {
-        act(send("DELETE", `/nav/${item.id}`), "Removed from the menu.");
-      }
+    out.push(["Remove", `Remove ${item.display} from this menu (the page itself isn't affected)`, async () => {
+      const r = await act(send("DELETE", `/nav/${item.id}`), "Removed from the menu.");
+      if (r.ok && window.AppHistory) AppHistory.done(`Removed “${item.display}” from the ${MENU_NAMES[menu]}.`);
     }]);
     return out;
   }

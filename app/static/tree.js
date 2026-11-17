@@ -256,11 +256,10 @@
     await act(send("POST", "/tree/pages", {label, parent_id: parentId}), `Added “${label.trim()}”.`);
   }
 
-  function removePage(node) {
-    const kids = node.children.length ? ` Its ${node.children.length} sub-page(s) move up a level.` : "";
-    if (window.confirm(`Remove the new page “${node.label}”?${kids}`)) {
-      act(send("DELETE", `/tree/pages/${node.id}`), "Removed.");
-    }
+  async function removePage(node) {
+    const kids = node.children.length ? ` Its ${pagesText(node.children.length)} moved up a level.` : "";
+    const r = await act(send("DELETE", `/tree/pages/${node.id}`), "Removed.");
+    if (r.ok && window.AppHistory) AppHistory.done(`Removed the new page “${node.label}”.${kids}`);
   }
 
   $("add-top").addEventListener("click", () => addPage(null));

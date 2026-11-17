@@ -50,12 +50,18 @@
     } catch (e) { /* offline: leave the buttons as they are */ }
   }
 
-  function say(text, isError) {
-    toast.textContent = text;
+  // A short message at the bottom of the screen; after an edit it carries an Undo button.
+  function say(text, isError, offerUndo) {
+    toast.replaceChildren(el("span", {text}));
+    if (offerUndo) {
+      const b = el("button", {type: "button", class: "toast-undo", text: "Undo"});
+      b.addEventListener("click", () => { toast.hidden = true; step("undo"); });
+      toast.append(b);
+    }
     toast.classList.toggle("error", !!isError);
     toast.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { toast.hidden = true; }, 6000);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, offerUndo ? 10000 : 6000);
   }
 
   async function step(which) {
@@ -79,6 +85,10 @@
       busy = false;
     }
   }
+
+  // Tabs call this after an edit they don't ask about first (removing, bulk changes): it says what
+  // happened and offers Undo right there.
+  window.AppHistory = {done: (text) => { say(text, false, true); refresh(); }};
 
   undoBtn.addEventListener("click", () => step("undo"));
   redoBtn.addEventListener("click", () => step("redo"));
@@ -104,6 +114,8 @@
     const method = ((init && init.method) || "GET").toUpperCase();
     const url = typeof input === "string" ? input : input.url;
     if (method !== "GET" && url.startsWith(`/api/p/${slug}/`) && !url.startsWith(api("/"))) {
+      // Another edit: a toast's Undo would now undo that one instead, so take the offer down.
+      if (toast.querySelector(".toast-undo")) toast.hidden = true;
       clearTimeout(timer);
       timer = setTimeout(refresh, 250);
     }
