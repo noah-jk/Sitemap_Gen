@@ -1,303 +1,131 @@
 # Sitemap_Gen
 
-Turn a Markdown nested-list sitemap into a clickable static HTML prototype.
+A self-hosted tool for taking a large site from **crawl → content audit → new sitemap and menus →
+clickable prototype**. It's two parts:
 
-A sitemap is a static document, but information architecture is something you
-*feel* by clicking. This tool generates a walkable prototype — real pages, real
-URLs, derived navigation — so you can experience the menus and flow before any
-design happens. Page content is intentionally low-fidelity wireframe placeholder.
+- **The web app** (`app/`): import a Screaming Frog crawl, decide what happens to every page, design
+  the new sitemap and navigation, and preview or download a wireframe prototype.
+- **The generator** (`sitemap2proto.py`): turns a sitemap into a static, clickable HTML prototype. It
+  runs on its own from a Markdown file, and the app uses it as a library.
 
-## Getting started
+## The web app
+
+Each client project is its own SQLite file. The tabs follow the workflow:
+
+- **Import:** the Screaming Frog **"Internal: All"** export as CSV. HTML pages only; `www`, bare-host,
+  `http`, and trailing-slash variants merge into one page, GA4 traffic is summed across hosts,
+  existing redirects are recorded, and problems on the live site (malformed links, the site answering
+  on two hosts) are listed. Turn on **Word Count** (Configuration → Spider → Extraction) and
+  **Near Duplicates** in Screaming Frog to fill the Words column and the "Short pages" view; the tab
+  says when a crawl left them empty. Re-importing keeps all decisions and structure.
+- **Pages:** the audit grid. Set Recommendation, Final Decision, status, notes, and page type per page
+  or in bulk (selected rows or everything matching the filters). **Combine** and **split** pick the
+  page(s) the content goes to, and rules are checked on every save; anything left inconsistent shows
+  in the **Problems** view. Built-in views cover the usual questions (undecided, no traffic, short
+  pages, dropped from the navigation…), and filters, sort, and columns save as named views. Paths link
+  to the live page. Click a label for the **detail panel**: every crawl column, traffic, where the page
+  sits in the new sitemap, and editable decision fields; ↑/↓ (or J/K) step through rows.
+- **Sitemap:** every kept page, nested as it will be in the new site, as a list or a **map** (top
+  three levels as columns, with a page count under each). Drag to reorder and re-nest, add new pages,
+  double-click a name to rename it, and click a page-type tag to change it.
+- **Navigation:** the main menu, utility nav, and footer, built separately from the sitemap by adding
+  what belongs (here, from the Sitemap tab, or in bulk from the grid, with sub-pages if wanted). List
+  or map view, drag within and between menus or use **Move to…**, shorter labels, headings, and
+  link/button chips. **Remove** takes an entry and everything under it.
+- **Prototype:** a sandboxed preview of the site built from the sitemap and menus, with menu style and
+  depth settings that save as you change them. Every page type (landing, listing, list, article,
+  form) has its own wireframe. The zip download is noindexed and ready to upload to S3.
+- **Exports:** the redirect map (decided pages only; old redirects re-pointed past removed pages), the
+  content audit CSV for the client, and a Markdown sitemap the generator can read.
+
+Every edit can be undone (**Undo**/**Redo** in the top bar, Ctrl/⌘+Z, and a **History** list), so
+removals and bulk edits don't ask first. Imports aren't part of the history. Light and dark themes
+follow the device, or pick one in the top bar.
+
+### Run it
+
+On the homelab, with Docker behind Nginx Proxy Manager. A GitHub Action tests every push and publishes
+`ghcr.io/noah-jk/sitemap_gen`: `latest` from `main`, plus a tag per branch (slashes become hyphens).
+
+- **Portainer:** Stacks → Add stack, paste `compose.yaml`, and set `LAN_IP` (the server's LAN address;
+  the app listens only there). Optional: `HOST_PORT` (default 8080), `PROXY_IP` (Nginx Proxy Manager's
+  address, so failed-login limits count per visitor), and `IMAGE_TAG` to run a branch build. Update
+  with **Pull and redeploy**. Create the first login from the container's Console:
+  `python -m app.manage create-user noah`.
+- **Command line:** put `LAN_IP=...` in `.env` next to `compose.yaml`, then
+  `docker compose pull && docker compose up -d` and
+  `docker compose exec app python -m app.manage create-user noah`.
+- **Locally:**
+
+  ```sh
+  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+  SITEMAP_DATA_DIR=./data .venv/bin/python -m app.manage create-user noah
+  SITEMAP_DATA_DIR=./data .venv/bin/uvicorn app.main:create_app --factory --port 8000
+  ```
+
+Data lives in the `sitemap_data` volume. Admin commands (`python -m app.manage …`): `create-user`,
+`set-password`, `list-users`, `migrate`, and `backup DEST_DIR`, which is safe while the app runs. Run
+it nightly, e.g. `docker exec <container> python -m app.manage backup /data/backups`, and copy the
+backups off the volume.
+
+### Security
+
+- Logins: scrypt hashes, 5 failed tries per visitor per 5 minutes, a signed SameSite=Strict session
+  cookie (14 days). Changing a password logs out other browsers. Set `SITEMAP_SECURE_COOKIES=1` if the
+  app is only reached over HTTPS (plain http on the LAN works without it).
+- Every change needs a CSRF token, pages carry a strict Content-Security-Policy, and request bodies
+  are capped (1 MB; 51 MB for a crawl upload) before anything reads them.
+- Prototype preview links work without logging in for 12 hours so they can be shared; the preview
+  runs sandboxed, with no access to the app.
+- `pip-audit -r requirements.txt` checks the pinned packages for known vulnerabilities.
+
+## The generator
+
+No dependencies, Python standard library only.
 
 ```sh
-cp sitemap-example.md sitemap.md   # start from the example
-# edit sitemap.md with your own structure
-python3 sitemap2proto.py sitemap.md
+cp sitemap-example.md sitemap.md        # sitemap.md is gitignored
+python3 sitemap2proto.py sitemap.md     # -> ./prototype/ (open prototype/index.html)
+python3 sitemap2proto.py --help
 ```
 
-`sitemap.md` is gitignored so your content stays local and out of version control.
+| Flag | Default | |
+|------|---------|---|
+| `--nav-style grid\|sidebar` | `grid` | Sub-pages as a card grid or a sticky sidebar |
+| `--dropdown-depth N` | `0` | Levels of flyout menus (0 = flat links) |
+| `--mega-menu` | off | Full-width mega menu (level 2 headers, level 3 links) |
+| `--sticky-header` | off | Keep the header fixed on scroll |
 
-## Usage
-
-```sh
-python3 sitemap2proto.py sitemap.md                     # -> ./prototype/
-python3 sitemap2proto.py sitemap.md out_dir             # custom output folder
-python3 sitemap2proto.py sitemap.md --nav-style sidebar # sidebar accordion layout
-python3 sitemap2proto.py sitemap.md --dropdown-depth 2  # 2-level flyout nav
-python3 sitemap2proto.py sitemap.md --mega-menu         # full-width column mega menu
-python3 sitemap2proto.py sitemap.md --sticky-header     # keep header fixed on scroll
-python3 sitemap2proto.py --help                         # full option list
-```
-
-Then open `prototype/index.html`, or serve it locally:
-
-```sh
-python3 -m http.server -d prototype 8000
-```
-
-No dependencies — Python standard library only.
-
-## Sitemap format
-
-A nested bullet list. Indentation defines hierarchy; any consistent indent
-width works (2 spaces, 4 spaces, or tabs). Top-level bullets become the global
-navigation; `index.html` is a generated landing page.
+The sitemap is a nested bullet list; indentation sets the hierarchy, and anything that isn't a list
+item is ignored. Optional `## Utility Nav` and `## Footer` sections (up to 4 columns) add those menus;
+their titles link to matching pages, or get pages of their own. Append `[button]` to a top-level item
+to show it as a button.
 
 ```md
 - About
   - Our Story
-  - Team
 - Products
-  - Widgets
-    - Blue Widget
   - Pricing
-- Contact
-```
+- Contact [button]
 
-Lines that aren't list items (headings, blank lines, `#` comments) are ignored,
-so you can annotate the file freely.
-
-### Utility Nav section
-
-Add a `## Utility Nav` heading to define a secondary navigation bar — a thin strip above the primary nav, right-aligned, desktop-only. Each top-level item is a link; add children to create a simple one-level dropdown.
-
-```md
-## Utility Nav
-
-- Help
-  - Getting Started
-  - FAQs
-- Login
-- Register
-```
-
-As with the footer, titles that match a page in the main sitemap link there. New titles get their own generated standalone pages.
-
-### Footer section
-
-Add a `## Footer` heading after the main sitemap to define a footer navigation
-menu with up to 4 columns. Top-level bullets are column headers (not linked);
-their children become links.
-
-```md
 ## Footer
-
 - Company
   - About
-  - Team
-- Legal
-  - Privacy Policy
-  - Terms of Service
 ```
 
-If a link title matches a page in the main sitemap, it links there. If it's a
-new title, a standalone page is generated for it (real URL, not in the global nav).
+Every build also writes `sitemap.html`, a clickable diagram of the whole tree, and every prototype has
+a mobile menu. The output folder is rebuilt from scratch each run (the script refuses to wipe a
+folder that doesn't look like a previous build), so don't hand-edit it.
 
-When the same title appears more than once in the sitemap (say, "Contact Us"
-in several sections), footer and utility links go to the shallowest one, and to
-the earliest in the file when they're at the same depth.
-
-### Button links
-
-Append `[button]` to any nav item to render it as a visually distinct button
-in the global navigation bar:
-
-```md
-- About
-- Products
-- Contact [button]
-```
-
-The `[button]` tag is stripped from the page title — the generated page is still
-called "Contact". The annotation works at any depth in the tree, but only items
-that appear in the top-level nav (direct children of root) are rendered as
-buttons; deeper items are plain links regardless.
-
-## How it works
-
-Three stages with a hard wall between them:
-
-1. **Parse** — Markdown text into a tree of nodes (stack-based indent parser). Special sections (`## Utility Nav`, `## Footer`) are extracted first; they can appear in any order.
-2. **Derive** — slugs and output paths from each node's position in the tree. Unknown titles from the Utility Nav and Footer sections get standalone nodes here.
-3. **Render** — one static HTML file per node, with navigation derived from the tree: global nav, utility nav strip, breadcrumbs, child links or sidebar, footer columns. Also produces `sitemap.html` — a clickable canvas diagram of the full tree.
-
-The renderer never knows the input was Markdown. A new input format (CSV, YAML)
-means writing one new parser; stages 2 and 3 are untouched.
-
-## Output
-
-Each run wipes and rebuilds the output folder, so the prototype is always a pure
-reflection of the sitemap. Don't hand-edit files inside `prototype/` — they're
-overwritten on the next run. The sitemap is the source of truth. To protect
-you from a typo, the script refuses to wipe a folder that has files in it but
-doesn't look like a previous build.
-
-Every build also generates **`prototype/sitemap.html`** — a visual sitemap
-diagram rendered on an HTML canvas. Each node is a clickable box that links to
-its generated page. It gives a bird's-eye view of the full information
-architecture alongside the walkable prototype.
-
-### Options
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--nav-style` | `grid`, `sidebar` | `grid` | How "In this section" renders: a card grid or a sticky sidebar accordion |
-| `--dropdown-depth` | integer ≥ 0 | `0` | Levels of flyout menus in the global nav. `0` = flat links, `1` = single dropdown, `2+` = nested flyouts |
-| `--mega-menu` | flag | off | Full-width mega menu panel with columns. Level 2 = column headers, level 3 = column links. Alternative to `--dropdown-depth` |
-| `--sticky-header` | flag | off | Keep the header fixed at the top of the viewport on scroll |
-
-All prototypes include a **responsive mobile menu**: on narrow screens the
-global nav is replaced by a hamburger button that slides in a full-height panel
-with an accordion for items that have children.
-
-## Using it as a library
-
-The script is also an importable module with no dependencies. Rendering never
-touches disk, so a web app can serve or zip the result directly:
+It works in three stages (parse Markdown → derive slugs and paths → render), and rendering never
+touches disk, which is how the app uses it:
 
 ```python
 import sitemap2proto as sp
-
-site = sp.site_from_markdown(open("sitemap.md").read())   # or build a sp.Site from a database
-files = sp.render_site(site, sp.Settings(mega_menu=True))  # {"index.html": "...", ...}
-sp.write_dir(files, "prototype")                           # or: zip_bytes = sp.write_zip(files)
+site = sp.site_from_markdown(open("sitemap.md").read())    # or build an sp.Site from a database
+files = sp.render_site(site, sp.Settings(mega_menu=True))   # {"index.html": "...", ...}
+sp.write_dir(files, "prototype")                            # or sp.write_zip(files); render_file() renders one page
 ```
-
-## Web app (content audit)
-
-`app/` is a self-hosted web app for working a Screaming Frog crawl into a
-content audit: import the crawl, then filter, sort, and set Recommendation / Final
-Decision / notes in a grid. Each client project is its own SQLite file under
-the data folder.
-
-In the grid, choosing **combine** or **split** opens a picker for the page(s)
-the content goes to. Rules are checked on every save: a combine or split needs
-a target, a target can't be a page that's being removed, and a split needs two
-or more pages including its redirect. Removing a page that others point at is
-allowed, and those pages show up in the **Problems** view. Bulk edits apply to
-the selected rows or to every page matching the current filters. Filters, sort,
-and the columns shown (**Columns** menu) can be saved as named views. The Label
-column stays in place while the grid scrolls sideways.
-
-Click a page's label to open its **detail panel**: where it sits in the new
-sitemap, its decision and redirect, notes, menus, the pages it absorbs, every
-crawl column, GA4 traffic, and other URLs that point at it. Recommendation,
-Final Decision, status, and page type are dropdowns right in the panel, the
-redirect and content targets open the picker when clicked, and notes save when
-you click away.
-↑ and ↓ (or J and K) step through the grid's rows, and Esc closes it.
-
-The sitemap and the menus are two related but separate structures.
-
-The **Sitemap** tab is where every kept page lives: drag the ⠿ handle (or use
-**Move…**) to reorder and re-nest pages, add new pages that don't exist on the
-current site, and rename pages (double-click a name to edit it in place; Enter
-saves, Esc cancels). Click a page's type tag to change its page type. Each page shows how many pages sit below it,
-how many it absorbs, and which menus it's in. In the grid, the bulk bar can
-also move every matching page under a section.
-
-The **Navigation** tab holds the main menu, utility nav, and footer. They start
-empty and you add what belongs in them, from the tab itself, from a page's
-**Add to menu…** in the Sitemap tab, or in bulk from the grid. **Map** lays
-each menu out in columns, the way a mega menu shows it (utility nav, main menu,
-footer), with a count of the entries under each; drag cards and columns within
-and between menus, or use an entry's **Move to…** to send it anywhere without
-dragging. In the list view, ▸/▾ collapses an entry's sub-entries (remembered
-per browser, with Collapse all and Expand all); a collapsed entry still drags
-with everything under it, and holding a dragged entry over it for a moment
-opens it. Entries can
-carry a shorter label than their page (double-click to rename; clear it to go
-back to the page's name), headings group links (footer columns, dropdown
-groups), and top-level main menu entries can be buttons (click their
-link/button chip). **Remove** takes an entry and everything under it out of the
-menu (the pages themselves stay); **Remove, keep its sub-entries** moves what was
-under it up into its place. Pages that
-aren't in any menu still exist, like landing pages. The grid's "In the current
-navigation but not in a new menu" view checks that nothing was dropped by
-accident.
-
-Every page has a **page type**: Landing, Listing (a filterable index like news
-or events), List (a page of links), Article, or Form. Types start as **Auto**,
-worked out from the sitemap (news or calendar items below → Listing, other
-sub-pages → Landing, form-like titles → Form, otherwise Article), and can be
-set in the grid's Page type column or in bulk. Each type gets its own
-wireframe in the prototype, built from blocks (hero, cards, filters, item
-rows, fields…), and the type is in the content audit.
-
-The **Prototype** tab builds the clickable prototype from the sitemap (pages
-and URLs) and the menus, with menu style and depth settings that save as you change them,
-and previews it in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has
-a `noindex` tag on every page and a `robots.txt` that blocks search engines,
-ready to upload to S3.
-
-**Undo** and **Redo** sit in the top bar on every project tab (also Ctrl/⌘+Z
-and Ctrl/⌘+Shift+Z). Every edit, whether in the grid, a bulk edit, a sitemap
-move, a menu change, or prototype settings, is one step, so a bulk edit of
-1,500 pages comes back with one click. **History** lists recent edits with who
-made them. Undo goes back one edit at a time, newest first, and the last 200
-are kept per project. Because of that, removing menu entries or new pages and
-bulk edits don't ask first: they happen at once, and the message that says so
-has its own Undo button. Imports aren't part of it, and undoing an edit only puts
-back what the person changed, never older crawl numbers.
-
-The app has a light and a dark theme. It follows the device by default, and
-the switch in the top bar (Auto, Light, Dark) overrides that per browser. The
-prototype keeps its own look either way.
-
-The **Exports** tab has the redirect map (only pages with a Final Decision;
-old redirects that would chain through a removed page are re-pointed), the
-content audit CSV, and a Markdown sitemap that `sitemap2proto.py` can read.
-
-Run locally:
-
-```sh
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-export SITEMAP_DATA_DIR=./data
-.venv/bin/python -m app.manage create-user noah
-.venv/bin/uvicorn app.main:create_app --factory --port 8000
-```
-
-Run on the homelab with Docker, behind Nginx Proxy Manager over HTTPS. The
-compose file needs one variable, `LAN_IP`: the server's LAN address, so the
-app listens only there. `HOST_PORT` changes the port (default 8080). `PROXY_IP` (the address Nginx Proxy Manager connects
-from, as shown in the app's request log) is optional; without it, failed-login
-limits count for all visitors together.
-
-A GitHub Action tests every push and publishes the image to
-`ghcr.io/noah-jk/sitemap_gen`: `latest` from `main`, plus a tag per branch
-(slashes become hyphens) and per commit. The server only pulls it; nothing is
-built there.
-
-- **Portainer:** Stacks → Add stack, paste `compose.yaml` into the Web editor
-  (or use Repository mode), and set `LAN_IP` under Environment variables. To
-  run a branch build, also set `IMAGE_TAG` to the branch tag. Update with
-  **Pull and redeploy**. Create the first login from the container's Console:
-  `python -m app.manage create-user noah`.
-- **Command line:** put `LAN_IP=...` in a `.env` file next to
-  `compose.yaml`, then `docker compose pull && docker compose up -d` and
-  `docker compose exec app python -m app.manage create-user noah`.
-
-Plain `http` works. If the app is only ever reached over HTTPS, set
-`SITEMAP_SECURE_COOKIES=1` so the login cookie is never sent over plain
-http. Data lives in the `sitemap_data` volume.
-
-Admin commands (`python -m app.manage ...`): `create-user NAME`, `migrate`,
-and `backup DEST_DIR`, which writes consistent copies of every database and
-is safe while the app is running. Run the backup nightly from the host's cron,
-e.g. `docker exec <container> python -m app.manage backup /data/backups`, and
-copy `/data/backups` off the volume as part of your normal backups.
-
-Import the **"Internal: All"** export as CSV. The importer keeps HTML pages only,
-merges `www`/bare-host/`http`/trailing-slash variants into one page, sums GA4
-traffic across hosts, records existing redirects, and lists problems on the
-live site (malformed links, the whole site answering on two hosts) under
-"Site issues" on the Import tab.
-
-Turn on **Word Count** in Screaming Frog (Configuration → Spider → Extraction)
-to fill the grid's Words column and the "Short pages" view: kept pages under
-200 words (Screaming Frog's own low-content cut-off), news and event items left
-out, which are good candidates to combine. The Import tab says when a crawl
-left Word Count or near duplicates empty.
 
 ## Tests
 
@@ -306,7 +134,6 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest
 ```
 
-`tests/golden/` holds the expected output for a few sitemaps and flag
-combinations, and the tests fail if any generated byte changes. After an
-intended output change, run `.venv/bin/pytest --update-golden` and review the
-diff in git before committing.
+`tests/golden/` holds the expected generator output for a few sitemaps and flag combinations; any
+changed byte fails the tests. After an intended change, run `.venv/bin/pytest --update-golden` and
+review the diff before committing.
