@@ -60,12 +60,7 @@
         }]);
     }
     if (menu === "main") out.push(["Add heading", `Add a heading under ${item.display}`, () => addHeading(menu, item.id)]);
-    out.push(["Rename", `Rename ${item.display}`, () => rename(item)]);
-    if (menu === "main" && parentId === null) {
-      out.push([item.is_button ? "Unmake button" : "Make button", "Show as a button in the main menu",
-        () => act(send("PATCH", `/nav/${item.id}`, {is_button: !item.is_button}),
-          item.is_button ? "No longer a button." : "Now a button.")]);
-    }
+    out.push(["Rename", `Rename ${item.display} (or double-click its name)`, () => InlineEdit.startFor(item.id)]);
     out.push(["Remove", `Remove ${item.display} from this menu`, () => {
       if (window.confirm(`Remove “${item.display}” from this menu? The page itself isn't affected.`)) {
         act(send("DELETE", `/nav/${item.id}`), "Removed from the menu.");
@@ -74,12 +69,38 @@
     return out;
   }
 
-  function itemTags(item) {
+  // Top-level main menu pages can show as a button: their chip switches between "link" and "button".
+  const buttonable = (item, menu, parentId) => menu === "main" && parentId === null && !item.heading;
+
+  function itemTags(item, canButton) {
     const out = [];
     if (item.heading) out.push(el("span", {class: "tag", text: "heading"}));
-    if (item.is_button) out.push(el("span", {class: "tag", text: "button"}));
+    if (canButton) {
+      const chip = el("button", {type: "button", class: `tag tag-toggle${item.is_button ? " on" : ""}`,
+        "aria-pressed": String(item.is_button), text: item.is_button ? "button" : "link",
+        title: item.is_button ? "Shows as a button in the main menu. Click to make it a plain link."
+          : "Shows as a plain link. Click to make it a button."});
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        act(send("PATCH", `/nav/${item.id}`, {is_button: !item.is_button}),
+          item.is_button ? `“${item.display}” is a plain link again.` : `“${item.display}” is now a button.`);
+      });
+      out.push(chip);
+    } else if (item.is_button) {
+      out.push(el("span", {class: "tag", text: "button"}));
+    }
     if (item.is_new) out.push(el("span", {class: "tag", text: "new page"}));
     return out;
+  }
+
+  // Double-click a name to rename the entry; clearing a page entry's name goes back to the page's own.
+  function renameOpts(item) {
+    return {
+      value: item.display, allowEmpty: !item.heading,
+      hint: item.heading ? "Double-click to rename" : "Double-click to rename. Clear it to use the page's own name.",
+      save: (text) => act(send("PATCH", `/nav/${item.id}`, {label: text}),
+        text ? "Renamed." : `Back to the page's own name, “${item.page_label}”.`),
+    };
   }
 
   const entriesText = (n) => `${n.toLocaleString()} entr${n === 1 ? "y" : "ies"}`;
@@ -113,7 +134,9 @@
 
   function row(item, siblings, index, menu, parentId, level) {
     const li = el("li", {"data-id": item.id});
-    const label = el("span", {class: "tree-label"}, el("span", {text: item.display}), ...itemTags(item));
+    const name = el("span", {text: item.display});
+    InlineEdit.attach(name, renameOpts(item));
+    const label = el("span", {class: "tree-label"}, name, ...itemTags(item, buttonable(item, menu, parentId)));
     const info = [];
     if (item.label && item.page_label) info.push(`page: ${item.page_label}`);
     if (item.url_path) info.push(item.url_path);
@@ -232,7 +255,7 @@
   // Laid out the way a page shows them: utility nav at the top, then the main menu, then the footer.
   const MENU_TITLES = {utility: "Utility nav", main: "Main menu", footer: "Footer"};
 
-  function entryCard(item, level) {
+  function entryCard(item, level, menu) {
     const n = below(item);
     const meta = [];
     if (n) meta.push(el("span", {class: "map-count", title: "Entries below this one in the menu", text: entriesText(n)}));
@@ -240,7 +263,7 @@
     if (item.label && item.page_label) meta.push(el("span", {class: "muted small", text: `${n ? " · " : ""}page: ${item.page_label}`}));
     const flag = item.problem
       ? el("span", {class: "problem-flag", title: item.problem, "aria-label": `Problem: ${item.problem}`, text: "!"}) : null;
-    return {label: item.display, meta, tags: itemTags(item), flag};
+    return {label: item.display, meta, tags: itemTags(item, level === 1 && buttonable(item, menu, null)), flag, rename: renameOpts(item)};
   }
 
   function renderMap() {
@@ -256,7 +279,7 @@
         el("span", {class: "muted small", text: total ? `${entriesText(total)} · ${items.length} at the top` : "Empty"}),
         el("span", {class: "toolbar"}, addPages, addHead));
       const {row, drop} = MapBoard.board({
-        roots: items, card: entryCard, group: "navmap", root: $("nav-map"), data: {menu},
+        roots: items, card: (item, level) => entryCard(item, level, menu), group: "navmap", root: $("nav-map"), data: {menu},
         emptyText: "Drop entries here", emptyBoard: "Empty. Add pages or a heading, or drag entries here from another menu.", sortables,
         actions: (item, siblings, index, horizontal) => {
           const parentId = findParent(item.id);
@@ -332,13 +355,6 @@
   });
 
   // ---- actions -----------------------------------------------------------------
-
-  function rename(item) {
-    const hint = item.heading ? "Heading name:" : "Menu label (leave empty to use the page's own name):";
-    const label = window.prompt(hint, item.label || item.display);
-    if (label === null) return;
-    act(send("PATCH", `/nav/${item.id}`, {label}), "Renamed.");
-  }
 
   function addHeading(menu, parentId) {
     const label = window.prompt("Heading name:");

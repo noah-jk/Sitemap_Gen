@@ -54,11 +54,41 @@
     const out = [];
     if (node.is_new) out.push(el("span", {class: "tag", text: "new"}));
     node.menus.forEach((m) => out.push(el("span", {class: "tag menu-tag", text: MENU_TAGS[m]})));
-    out.push(el("span", {class: "tag", title: node.page_type ? "Page type (set in the Pages grid)" :
-      "Page type worked out from the sitemap; set it in the Pages grid to override",
-      text: TYPES[node.type] + (node.page_type ? "" : " (auto)")}));
+    const type = el("button", {type: "button", class: "tag tag-edit",
+      title: node.page_type ? "Page type. Click to change it." : "Page type, worked out from the sitemap. Click to set it.",
+      text: TYPES[node.type] + (node.page_type ? "" : " (auto)")});
+    type.addEventListener("click", (e) => { e.stopPropagation(); editType(node, type); });
+    out.push(type);
     return out;
   }
+
+  // The type tag turns into a dropdown in place; picking a type saves it, Esc or clicking away keeps it.
+  function editType(node, tag) {
+    const select = el("select", {class: "tag-select", "aria-label": `Page type for ${node.label}`});
+    select.append(el("option", {value: "", text: node.page_type ? "Auto" : `Auto (${TYPES[node.type]})`}));
+    Object.entries(TYPES).forEach(([k, v]) => select.append(el("option", {value: k, text: v})));
+    select.value = node.page_type || "";
+    tag.replaceWith(select);
+    select.focus();
+    try { select.showPicker(); } catch (e) { /* not every browser can open it for us */ }
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (save && select.value !== (node.page_type || "")) {
+        patch(node, {page_type: select.value || null}, `Page type set to ${select.value ? TYPES[select.value] : "Auto"}.`);
+      } else {
+        select.replaceWith(tag);
+      }
+    };
+    select.addEventListener("change", () => finish(true));
+    select.addEventListener("blur", () => finish(false));
+    select.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); finish(false); } });
+    ["mousedown", "click"].forEach((t) => select.addEventListener(t, (e) => e.stopPropagation()));
+  }
+
+  // Double-click a page's name to rename it.
+  const renameOpts = (node) => ({value: node.label, save: (text) => patch(node, {label: text}, "Renamed.")});
 
   function pagesText(n) {
     return `${n.toLocaleString()} page${n === 1 ? "" : "s"}`;
@@ -73,7 +103,7 @@
       () => act(send("POST", "/tree/move", {id: node.id, parent_id: node.parentId, index: index + 1}), "Moved.")]);
     list.push(["Move…", `Move ${node.label} under another page`, () => openMove(node)]);
     list.push(["Add sub-page", `Add a page under ${node.label}`, () => addPage(node.id)]);
-    list.push(["Rename", `Rename ${node.label}`, () => rename(node)]);
+    list.push(["Rename", `Rename ${node.label} (or double-click its name)`, () => InlineEdit.startFor(node.id)]);
     list.push(["Add to menu…", `Add ${node.label} to a menu`, () => MenuPicker.open({
       api, csrf, title: `Add “${node.label}” to a menu`, target: {page_ids: [node.id]},
       onDone: (added, menuName) => {
@@ -102,7 +132,9 @@
     if (node.descendants) meta.push(`${node.descendants.toLocaleString()} below`);
     if (node.collection_count) meta.push(`incl. ${node.collection_count.toLocaleString()} collection items`);
     if (node.absorbs) meta.push(`absorbs ${node.absorbs}`);
-    const label = el("span", {class: "tree-label"}, el("span", {text: node.label}), ...tags(node));
+    const name = el("span", {text: node.label});
+    InlineEdit.attach(name, renameOpts(node));
+    const label = el("span", {class: "tree-label"}, name, ...tags(node));
 
     const actions = el("span", {class: "tree-actions"});
     actionsFor(node, siblings, index, {up: "↑", down: "↓"}).forEach(([text, title, fn]) => {
@@ -177,7 +209,7 @@
       : el("span", {class: "map-count muted", text: level === 1 ? "No sub-pages" : ""});
     const meta = [below];
     if (node.absorbs) meta.push(el("span", {class: "muted small", text: ` · absorbs ${node.absorbs}`}));
-    return {label: node.label, meta, tags: tags(node), flag: null};
+    return {label: node.label, meta, tags: tags(node), flag: null, rename: renameOpts(node)};
   }
 
   function renderMap(total) {
@@ -215,11 +247,6 @@
     }
     status.textContent = r.ok ? done : (r.data.detail || "That didn't work.");
     await load();
-  }
-
-  function rename(node) {
-    const label = window.prompt("New name for this page:", node.label);
-    if (label && label.trim() && label.trim() !== node.label) patch(node, {label}, "Renamed.");
   }
 
   async function addPage(parentId) {

@@ -34,7 +34,7 @@ window.MapBoard = (function () {
    * board(opts) returns {row, drop}: the row of columns, and the strip to put above it where a card
    * or column dropped becomes the first top-level item.
    *   roots      top-level items, each with .id and .children
-   *   card(item, level) -> {label, meta: [Node], tags: [Node], flag: Node|null}
+   *   card(item, level) -> {label, meta: [Node], tags: [Node], flag: Node|null, rename: InlineEdit options}
    *   actions(item, siblings, index, horizontal) -> [[text, title, handler], ...]
    *   onMove({id, parentId, index, to})   to = the dataset of the list it was dropped in
    *   data       extra data-* attributes on every list (the Navigation tab marks the menu)
@@ -63,8 +63,9 @@ window.MapBoard = (function () {
       const head = el("div", {class: "map-head"},
         el("span", {class: "map-grip", title: "Drag to move", "aria-hidden": "true", text: "⠿"}));
       if (c.flag) head.append(c.flag);
-      head.append(el("span", {class: "map-label", text: c.label}),
-        cardMenu(c.label, opts.actions(item, siblings, index, level === 1)));
+      const name = el("span", {class: "map-label", text: c.label});
+      if (c.rename && window.InlineEdit) InlineEdit.attach(name, c.rename);  // double-click to rename
+      head.append(name, cardMenu(c.label, opts.actions(item, siblings, index, level === 1)));
       node.append(head, el("div", {class: "map-meta"}, ...c.meta), el("div", {class: "map-tags"}, ...c.tags));
       if (level === 2) node.append(list(item.children, item.id, 3));
       return node;

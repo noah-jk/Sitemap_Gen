@@ -191,7 +191,8 @@ The sitemap and the menus are two related but separate structures.
 
 The **Sitemap** tab is where every kept page lives: drag the ⠿ handle (or use
 **Move…**) to reorder and re-nest pages, add new pages that don't exist on the
-current site, and rename pages. Each page shows how many pages sit below it,
+current site, and rename pages (double-click a name to edit it in place; Enter
+saves, Esc cancels). Click a page's type tag to change its page type. Each page shows how many pages sit below it,
 how many it absorbs, and which menus it's in. In the grid, the bulk bar can
 also move every matching page under a section.
 
@@ -205,8 +206,10 @@ dragging. In the list view, ▸/▾ collapses an entry's sub-entries (remembered
 per browser, with Collapse all and Expand all); a collapsed entry still drags
 with everything under it, and holding a dragged entry over it for a moment
 opens it. Entries can
-carry a shorter label than their page, headings group links (footer columns,
-dropdown groups), and top-level main menu entries can be buttons. Pages that
+carry a shorter label than their page (double-click to rename; clear it to go
+back to the page's name), headings group links (footer columns, dropdown
+groups), and top-level main menu entries can be buttons (click their
+link/button chip). Pages that
 aren't in any menu still exist, like landing pages. The grid's "In the current
 navigation but not in a new menu" view checks that nothing was dropped by
 accident.
@@ -220,8 +223,8 @@ wireframe in the prototype, built from blocks (hero, cards, filters, item
 rows, fields…), and the type is in the content audit.
 
 The **Prototype** tab builds the clickable prototype from the sitemap (pages
-and URLs) and the menus, with menu style and depth settings, and previews it
-in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has
+and URLs) and the menus, with menu style and depth settings that save as you change them,
+and previews it in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has
 a `noindex` tag on every page and a `robots.txt` that blocks search engines,
 ready to upload to S3.
 

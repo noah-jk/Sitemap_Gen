@@ -519,3 +519,19 @@ def test_page_detail(imported):
     d = imported.get(f"/api/p/example/pages/{contact['id']}/detail").json()
     assert d["sitemap"] is None and d["redirect_label"] == "Contact Us"  # being combined: not in the new sitemap
     assert imported.get("/api/p/example/pages/999999/detail").status_code == 404
+
+
+def test_prototype_settings_save_as_json_for_the_page_script(imported):
+    token = csrf_from(imported.get("/p/example/prototype").text)
+    hdr = {"X-Requested-With": "fetch"}
+    r = imported.post("/p/example/prototype/settings", headers=hdr,
+                      data={"csrf": token, "nav_style": "sidebar", "menu": "dropdown", "dropdown_depth": "3",
+                            "version_label": "v2 draft!"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "version_label": "v2draft"}
+    page = imported.get("/p/example/prototype").text
+    assert 'value="v2draft"' in page and 'value="sidebar" selected' in page
+    bad = imported.post("/p/example/prototype/settings", headers=hdr, data={"csrf": token, "nav_style": "nope"})
+    assert bad.status_code == 400 and "detail" in bad.json()
+    # A plain form post (no script) still redirects back to the page.
+    r = imported.post("/p/example/prototype/settings", data={"csrf": token, "nav_style": "grid"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("saved=1")
