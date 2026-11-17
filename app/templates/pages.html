@@ -37,9 +37,13 @@
       <option value="parent_id">Parent (move under)</option>
       <option value="menu">Menu (add to)</option>
       <option value="page_type">Page type</option>
+      <option value="priority">Priority</option>
+      <option value="owner">Owner</option>
+      <option value="writer">Writer</option>
     </select>
   </label>
-  <label class="inline">to <select id="bulk-value"></select></label>
+  <label class="inline">to <select id="bulk-value"></select>
+    <input id="bulk-text" type="text" maxlength="100" placeholder="Name (empty clears it)" hidden></label>
   <button type="button" class="primary" id="bulk-apply">Apply</button>
 </div>
 <div id="grid"></div>

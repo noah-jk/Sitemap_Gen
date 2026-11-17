@@ -12,11 +12,16 @@ REMOVED = ("delete", "combine", "split")  # pages that won't exist after launch
 _REM = "('delete','combine','split')"
 STATUSES = ("todo", "done")
 MAX_NOTES = 5000
-SCALAR_FIELDS = ("recommendation", "decision", "status", "notes", "redirect_to", "label", "is_button", "page_type")
+SCALAR_FIELDS = ("recommendation", "decision", "status", "notes", "redirect_to", "label", "is_button", "page_type",
+                 "new_url", "owner", "writer", "priority", "suggested_content")
+PRIORITIES = ("high", "medium", "low")
+MAX_PERSON = 100
+MAX_URL = 300
 PAGE_TYPES = ("landing", "listing", "list", "article", "form")
 MAX_LABEL = 200
 EDITABLE = set(SCALAR_FIELDS) | {"content_targets"}
-BULK_EDITABLE = {"recommendation", "decision", "status", "redirect_to", "parent_id", "page_type"}
+BULK_EDITABLE = {"recommendation", "decision", "status", "redirect_to", "parent_id", "page_type",
+                 "owner", "writer", "priority"}
 
 _CHECKS = [
     ("p.e IN ('combine','split') AND p.redirect_to IS NULL",
@@ -40,6 +45,24 @@ PROBLEMS_SQL = (
     + " || ".join(f"CASE WHEN {cond} THEN {msg} || ' ' ELSE '' END" for cond, msg in _CHECKS)
     + ") AS msg FROM eff p LEFT JOIN eff t ON t.id = p.redirect_to"
 )
+
+
+def clean_url(value) -> str:
+    """A planned URL is a path on the new site: '/admissions/visit'. Empty means 'follow the sitemap'
+    for new pages and 'unchanged' for existing ones. A full address keeps only its path."""
+    from urllib.parse import urlsplit
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if "://" in value:
+        value = urlsplit(value).path or "/"
+    if not value.startswith("/"):
+        value = "/" + value
+    if any(c.isspace() for c in value) or any(c in value for c in "?#<>\"\\"):
+        raise RuleError(["A URL path can't contain spaces or ? # < > \" \\."])
+    if len(value) > MAX_URL:
+        raise RuleError([f"Keep the URL under {MAX_URL} characters."])
+    return value.rstrip("/") or "/"
 
 
 class RuleError(ValueError):
@@ -76,8 +99,16 @@ def _clean(changes: dict, allowed: set) -> dict:
             value = value or "todo"
             if value not in STATUSES:
                 raise RuleError(["status must be todo or done."])
-        elif field == "notes":
+        elif field in ("notes", "suggested_content"):
             value = str(value or "")[:MAX_NOTES]
+        elif field in ("owner", "writer"):
+            value = " ".join(str(value or "").split())[:MAX_PERSON]
+        elif field == "priority":
+            value = value or ""
+            if value not in PRIORITIES + ("",):
+                raise RuleError(["Priority must be high, medium, or low (or empty)."])
+        elif field == "new_url":
+            value = clean_url(value)
         elif field == "label":
             value = " ".join(str(value or "").split())[:MAX_LABEL]
             if not value:
@@ -152,6 +183,11 @@ def apply_changes(conn: sqlite3.Connection, page_id: int, changes: dict, updated
             raise KeyError(page_id)
         if row["updated_at"] != updated_at:
             raise Conflict(row)
+        if changes.get("new_url"):
+            from app import urls
+            taken = urls.taken_by(conn, changes["new_url"], page_id)
+            if taken:
+                raise RuleError([f'{changes["new_url"]} is already used by "{taken}".'])
         targets = [changes["redirect_to"]] if changes.get("redirect_to") is not None else []
         targets += changes.get("content_targets", [])
         _check_targets_exist(conn, [page_id], targets)

@@ -35,6 +35,8 @@ def _csv(header: List[str], rows: List[list]) -> str:
 AUDIT_COLUMNS: List[Tuple[str, str]] = [
     ("Address", "current_url"), ("Recommendation", "recommendation"), ("Final Decision", "decision"),
     ("Notes", "notes"), ("Redirect To", "redirect_url"), ("Content Goes To", "content_urls"),
+    ("New URL", "planned_url"), ("Owner", "owner"), ("Writer", "writer"), ("Priority", "priority"),
+    ("Suggested Content", "suggested_content"),
     ("Status", "status"), ("Page Type", "type"), ("Label", "label"), ("Title", "title"), ("H1", "h1"),
     ("Meta Description", "meta_description"), ("HTTP Status", "status_code"), ("Crawl Depth", "crawl_depth"),
     ("Inlinks", "inlinks"), ("Unique Inlinks", "unique_inlinks"), ("% of Total", "pct_of_total"),
@@ -47,17 +49,45 @@ AUDIT_COLUMNS: List[Tuple[str, str]] = [
 ALWAYS_KEEP = {"Address", "Recommendation", "Final Decision", "Notes"}
 
 
+def site_base(conn) -> str:
+    """https://host of the site, for turning planned paths into addresses."""
+    host = (conn.execute("SELECT canonical_host FROM settings").fetchone() or {"canonical_host": ""})["canonical_host"]
+    row = conn.execute("SELECT current_url FROM pages WHERE current_url LIKE 'http%' LIMIT 1").fetchone()
+    scheme = urlsplit(row["current_url"]).scheme if row else "https"
+    return f"{scheme}://{host}" if host else ""
+
+
+def planned_addresses(conn) -> Dict[int, str]:
+    """Every page's address on the new site: its current address unless it's new or moving."""
+    from app import urls
+    base = site_base(conn)
+    current = {r["id"]: (r["current_url"], r["url_path"], r["new_url"])
+               for r in conn.execute("SELECT id, current_url, url_path, new_url FROM pages")}
+    out = {}
+    for page_id, path in urls.planned(conn).items():
+        cur, key, typed = current[page_id]
+        out[page_id] = cur if cur and not typed else base + path
+    return out
+
+
 def content_audit_csv(conn) -> str:
     rows = conn.execute(
-        "SELECT p.*, COALESCE(t.current_url, t.label) AS redirect_url, "
+        "SELECT p.*, p.redirect_to AS redirect_id, "
         "CASE p.in_current_nav WHEN 1 THEN 'Yes' ELSE '' END AS in_nav, "
         "CASE p.missing_from_crawl WHEN 1 THEN 'Yes' ELSE '' END AS missing, "
-        "(SELECT group_concat(COALESCE(x.current_url, x.label), '; ') FROM page_content_targets c "
-        " JOIN pages x ON x.id = c.target_id WHERE c.page_id = p.id) AS content_urls "
-        "FROM pages p LEFT JOIN pages t ON t.id = p.redirect_to ORDER BY p.is_new, p.url_path, p.label").fetchall()
-    from app import tree
+        "(SELECT json_group_array(c.target_id) FROM page_content_targets c WHERE c.page_id = p.id) AS content_ids "
+        "FROM pages p ORDER BY p.is_new, p.url_path, p.label").fetchall()
+    from app import tree, urls
     resolved = {n.id: n.type for n, _, _ in tree.walk(tree.load(conn))}
-    rows = [dict(r, type=resolved.get(r["id"], r["page_type"])) for r in rows]
+    planned, addresses = urls.planned(conn), planned_addresses(conn)
+
+    def new_url(r) -> str:  # only when it differs from today's
+        return addresses[r["id"]] if r["is_new"] or (r["new_url"] and r["new_url"] != r["url_path"]) else ""
+
+    rows = [dict(r, type=resolved.get(r["id"], r["page_type"]), planned_url=new_url(r),
+                 redirect_url=addresses.get(r["redirect_id"], "") if r["redirect_id"] else "",
+                 content_urls="; ".join(addresses[i] for i in json.loads(r["content_ids"]) if i in addresses))
+            for r in rows]
     extras = [json.loads(r["crawl_extra"] or "{}") for r in rows]
     extra_cols = list(dict.fromkeys(k for e in extras for k in e))
     header = [h for h, _ in AUDIT_COLUMNS] + extra_cols
@@ -104,24 +134,32 @@ def redirect_map(conn) -> RedirectMap:
     canonical = settings["canonical_host"] if settings else ""
     aliases = host_aliases(canonical) if canonical else set()
 
+    addresses = planned_addresses(conn)  # new pages and moving pages: where they'll be
+
     # Removed pages: url key -> final URL ('' when the page is deleted with no redirect).
     final: Dict[str, str] = {}
     for r in conn.execute(
-            "SELECT p.id, p.label, p.decision, p.current_url, p.url_path, t.current_url AS to_url, t.label AS to_label, "
-            "t.is_new AS to_new FROM pages p LEFT JOIN pages t ON t.id = p.redirect_to "
+            "SELECT p.id, p.label, p.decision, p.current_url, p.url_path, p.redirect_to FROM pages p "
             "WHERE p.decision IN ('delete','combine','split') AND p.url_path IS NOT NULL ORDER BY p.url_path"):
         if r["id"] in m.blocking:
             continue
-        if r["to_url"]:
-            final[r["url_path"]] = r["to_url"]
-            m.rows.append(["page", _path(r["current_url"]), r["current_url"], r["to_url"],
+        to_url = addresses.get(r["redirect_to"], "") if r["redirect_to"] else ""
+        if to_url:
+            final[r["url_path"]] = to_url
+            m.rows.append(["page", _path(r["current_url"]), r["current_url"], to_url,
                            f'{r["label"]} ({r["decision"]})'])
-        elif r["to_new"]:
-            final[r["url_path"]] = ""
-            m.unresolved.append(f'{r["current_url"]} → new page "{r["to_label"]}" has no URL yet')
         else:
             final[r["url_path"]] = ""
             m.will_404 += 1
+
+    # Pages that stay but move to a new URL.
+    for r in conn.execute(
+            "SELECT id, label, current_url, url_path, new_url FROM pages WHERE is_new = 0 AND url_path IS NOT NULL "
+            "AND new_url <> '' AND new_url IS NOT url_path "
+            "AND COALESCE(decision, recommendation, '') NOT IN ('delete','combine','split') ORDER BY url_path"):
+        final[r["url_path"]] = addresses[r["id"]]
+        m.rows.append(["moved", _path(r["current_url"]), r["current_url"], addresses[r["id"]],
+                       f'{r["label"]} (new URL)'])
 
     # Existing redirects that land on a removed page (possibly through other old redirects).
     existing = {page_key(r["source_url"], aliases): r for r in conn.execute("SELECT * FROM existing_redirects")}

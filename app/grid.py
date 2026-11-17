@@ -16,12 +16,17 @@ FIELDS: Dict[str, str] = {
     "menus": "(SELECT group_concat(DISTINCT n.menu) FROM nav_items n WHERE n.page_id = p.id)",
     "content_targets": "(SELECT json_group_array(target_id) FROM page_content_targets WHERE page_id = p.id)",
     "problem": "pr.msg", "updated_at": "p.updated_at",
+    "new_url": "p.new_url", "owner": "p.owner", "writer": "p.writer", "priority": "p.priority",
+    "suggested_content": "p.suggested_content",
 }
 # Grid columns that can be hidden (Label, the checkbox, and the problem marker always show).
 HIDEABLE = {"url_path", "status_code", "sessions", "inlinks", "word_count", "in_current_nav", "collection",
-            "parent_label", "menus", "page_type", "recommendation", "decision", "redirect_label", "status", "notes"}
-TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem", "menus"}
-EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl", "page_type"}
+            "parent_label", "menus", "page_type", "recommendation", "decision", "redirect_label", "status", "notes",
+            "new_url", "owner", "writer", "priority", "suggested_content"}
+TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem", "menus",
+                "new_url", "owner", "writer", "suggested_content"}
+EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl", "page_type",
+                 "priority"}
 
 # Same cut-off as Screaming Frog's own "Low Content Pages" filter. Short pages are candidates to combine.
 SHORT_WORDS = 200
@@ -44,6 +49,8 @@ PRESETS: Dict[str, Tuple[str, str]] = {
     "short": (f"Short pages (under {SHORT_WORDS} words)",
               f"p.word_count < {SHORT_WORDS} AND p.status_code = 200 AND {KEPT} AND p.collection = ''"),
     "missing": ("Missing from the latest crawl", "p.missing_from_crawl = 1"),
+    "new": ("New pages (not on the current site)", "p.is_new = 1"),
+    "moving": ("Moving to a new URL", "p.is_new = 0 AND p.new_url <> '' AND p.new_url IS NOT p.url_path"),
 }
 
 FROM = (f"FROM pages p LEFT JOIN pages t ON t.id = p.redirect_to LEFT JOIN pages pp ON pp.id = p.parent_id "

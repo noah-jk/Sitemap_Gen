@@ -22,7 +22,11 @@
   // crawl become links; a click on the link doesn't select the row.
   function pathFormatter(cell) {
     const path = cell.getValue();
-    if (!path) return el("span", {class: "muted", text: "(new page)"});
+    if (!path) {  // a new page: its planned URL, from where it sits in the sitemap
+      const planned = cell.getData().planned_url || "";
+      return el("span", {class: "planned", title: "New page. Planned URL, from where it sits in the sitemap"},
+        el("span", {class: "tag tag-new", text: "new"}), document.createTextNode(` ${planned}`));
+    }
     const url = cell.getData().current_url || "";
     if (!/^https?:\/\//i.test(url)) return document.createTextNode(path);  // never a string: Tabulator would parse it as HTML
     const a = el("a", {href: url, target: "_blank", rel: "noopener noreferrer", class: "live-link",
@@ -84,6 +88,9 @@
     } else {
       currentPreset = value.startsWith("preset:") ? value.slice(7) : "";
       table.clearSort();
+      if (currentPreset === "new" || currentPreset === "moving") {  // these views are about planning
+        setHidden(hiddenFields().filter((f) => !["new_url", "owner", "writer", "priority"].includes(f)));
+      }
     }
     const url = new URL(window.location.href);
     if (currentPreset && !value.startsWith("saved:")) url.searchParams.set("view", currentPreset);
@@ -123,6 +130,8 @@
   // ---- grid ------------------------------------------------------------------
 
   const choices = [""].concat(DISPOSITIONS);
+  const PRIORITY_CHOICES = {"": "(none)", high: "high", medium: "medium", low: "low"};
+  const PLANNING = ["new_url", "owner", "writer", "priority", "suggested_content"];
   const TYPE_CHOICES = {"": "Auto", landing: "Landing", listing: "Listing", list: "List", article: "Article", form: "Form"};
   const filterChoices = {"": "", "(blank)": "(blank)"};
   DISPOSITIONS.forEach((c) => { filterChoices[c] = c; });
@@ -205,6 +214,22 @@
       {title: "Status", field: "status", width: 84, editor: "list", editorParams: {values: ["todo", "done"]},
        headerFilter: "list", headerFilterParams: {values: {"": "", todo: "todo", done: "done"}}},
       {title: "Notes", field: "notes", formatter: "plaintext", editor: "textarea", headerFilter: "input", minWidth: 180},
+      // Planning (hidden until turned on in Columns, or by the New pages view)
+      {title: "New URL", field: "new_url", editor: "input", headerFilter: "input", minWidth: 180,
+       headerTooltip: "Where the page will live on the new site. Empty: a new page follows the sitemap; an existing page keeps its URL.",
+       formatter: (cell) => {
+         const typed = cell.getValue();
+         if (typed) return document.createTextNode(typed);
+         const d = cell.getData();
+         return d.is_new ? el("span", {class: "muted", text: `${d.planned_url} (from sitemap)`}) : "";
+       }},
+      {title: "Owner", field: "owner", formatter: "plaintext", editor: "input", headerFilter: "input", width: 120},
+      {title: "Writer", field: "writer", formatter: "plaintext", editor: "input", headerFilter: "input", width: 120},
+      {title: "Priority", field: "priority", width: 96, editor: "list", editorParams: {values: PRIORITY_CHOICES},
+       formatter: "plaintext", headerFilter: "list",
+       headerFilterParams: {values: {"": "", "(blank)": "(blank)", high: "high", medium: "medium", low: "low"}}, headerFilterFunc: "="},
+      {title: "Suggested content", field: "suggested_content", formatter: "plaintext", editor: "textarea",
+       headerFilter: "input", minWidth: 200},
     ],
   });
 
@@ -391,9 +416,13 @@
   const bulkValue = $("bulk-value");
   function fillBulkValues() {
     const field = $("bulk-field").value;
+    const text = field === "owner" || field === "writer";  // free text instead of a list
+    bulkValue.hidden = text;
+    $("bulk-text").hidden = !text;
     const values = field === "status" ? ["todo", "done"]
       : field === "parent_id" ? ["pick", "top"] : field === "menu" ? ["add"]
       : field === "page_type" ? Object.keys(TYPE_CHOICES)
+      : field === "priority" ? ["", "high", "medium", "low"]
       : ["", "keep", "delete", "review", "combine"];
     const names = Object.assign({"": "(clear)", combine: "combine into…", pick: "a page I choose…",
       top: "the top level", add: "a menu I choose…"}, field === "page_type" ? TYPE_CHOICES : {});
@@ -407,7 +436,7 @@
     const ids = table.getSelectedData().map((r) => r.id);
     if (!all && !ids.length) { status.textContent = "Select some rows first, or tick “use all matching pages”."; return; }
     const field = $("bulk-field").value;
-    const value = bulkValue.value;
+    const value = $("bulk-text").hidden ? bulkValue.value : $("bulk-text").value.trim();
     const count = all ? lastTotal : ids.length;
     const target = all
       ? {match: {view: currentPreset, filters: table.getHeaderFilters().map((f) => ({field: f.field, value: f.value}))}}
@@ -474,7 +503,8 @@
       }
     });
     if (remember) {
-      try { localStorage.setItem(HIDE_KEY, JSON.stringify(hiddenFields())); } catch (e) { /* not remembered */ }
+      const seen = choosable().map((c) => c.getField());
+      try { localStorage.setItem(HIDE_KEY, JSON.stringify({hidden: hiddenFields(), seen})); } catch (e) { /* not remembered */ }
     }
     drawColumnList();
   }
@@ -495,10 +525,14 @@
   const colMenu = $("col-menu");
   document.addEventListener("click", (e) => { if (colMenu.open && !colMenu.contains(e.target)) colMenu.open = false; });
 
+  // Columns added since the browser last saved its choice (the planning ones, to begin with) start hidden.
   table.on("tableBuilt", () => {
-    let saved = [];
-    try { saved = JSON.parse(localStorage.getItem(HIDE_KEY) || "[]"); } catch (e) { saved = []; }
-    setHidden(Array.isArray(saved) ? saved : [], false);
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(HIDE_KEY) || "null"); } catch (e) { saved = null; }
+    const hidden = Array.isArray(saved) ? saved.slice() : (saved && Array.isArray(saved.hidden) ? saved.hidden.slice() : []);
+    const seen = saved && Array.isArray(saved.seen) ? saved.seen : [];
+    PLANNING.forEach((f) => { if (!seen.includes(f) && !hidden.includes(f)) hidden.push(f); });
+    setHidden(hidden, false);
   });
 
   // ---- detail panel ----------------------------------------------------------
@@ -579,6 +613,24 @@
     pairs.push(["Page type", edit("page_type", d.page_type, typeOptions)]);
     parts.push(section("Decision", facts(pairs)));
 
+    // Planning: where it will live and who it needs. Each saves when changed.
+    const textEdit = (field, value, attrs) => {
+      const input = el(attrs.multiline ? "textarea" : "input", Object.assign({"aria-label": attrs.label}, attrs.multiline
+        ? {rows: "3"} : {type: "text", maxlength: attrs.max || "100"}, attrs.placeholder ? {placeholder: attrs.placeholder} : {}));
+      input.value = value || "";
+      input.addEventListener("change", () => changeField(row, field, input.value.trim() || null, input, value || ""));
+      return input;
+    };
+    const urlHint = d.is_new ? `${d.planned_url} (from the sitemap)` : `${d.url_path || ""} (unchanged)`;
+    parts.push(section("Planning", facts([
+      ["New URL", textEdit("new_url", d.new_url, {label: "New URL", max: "300", placeholder: urlHint})],
+      ["Owner", textEdit("owner", d.owner, {label: "Owner"})],
+      ["Writer", textEdit("writer", d.writer, {label: "Writer"})],
+      ["Priority", edit("priority", d.priority, PRIORITY_CHOICES)],
+    ]), el("label", {class: "dt-field"}, el("span", {class: "muted small", text: "Suggested content"}),
+      textEdit("suggested_content", d.suggested_content, {label: "Suggested content", multiline: true,
+        placeholder: d.incoming.length ? `Draws on ${d.incoming.map((p) => p.label).join(", ")}` : "What should this page say or include?"}))));
+
     // Notes: saved with the button, Ctrl/Cmd+Enter, or when you click away.
     const notes = el("textarea", {rows: "4", "aria-label": "Notes"});
     notes.value = d.notes || "";
@@ -643,7 +695,8 @@
     $("dt-next").disabled = !neighbour(1);
   }
 
-  const FIELD_TITLES = {recommendation: "Recommendation", decision: "Final Decision", status: "Status", page_type: "Page type"};
+  const FIELD_TITLES = {recommendation: "Recommendation", decision: "Final Decision", status: "Status", page_type: "Page type",
+    priority: "Priority"};
 
   // The grid row for the open page, or a stand-in when the page isn't on the grid's current page.
   function rowFor(d) {

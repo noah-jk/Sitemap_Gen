@@ -188,3 +188,29 @@ def test_pull_in_new_sub_pages(conn):
     heading = nav.add_heading(conn, "main", None, "More")
     with pytest.raises(rules.RuleError, match="Headings aren't pages"):
         nav.add_subpages(conn, heading)
+
+
+def test_new_page_from_a_menu_goes_into_the_sitemap_too(conn):
+    from app import urls
+    nav.add_pages(conn, "main", None, [pid(conn, "/admissions")])
+    adm_entry = item_id(conn, "main", "Admissions")
+    made = nav.add_new_page(conn, "main", adm_entry, "  Visit   Campus ")
+    assert made["sitemap_parent"] == "Admissions"
+    page = conn.execute("SELECT label, parent_id, is_new FROM pages WHERE id = ?", (made["page_id"],)).fetchone()
+    assert tuple(page) == ("Visit Campus", pid(conn, "/admissions"), 1)
+    assert [c["display"] for c in nav.load(conn)["main"][0]["children"]] == ["Visit Campus"]
+    assert urls.planned(conn)[made["page_id"]] == "/admissions/visit-campus"
+    # Under a heading, or at the top: the sitemap's top level.
+    help_col = nav.add_heading(conn, "footer", None, "Help")
+    assert nav.add_new_page(conn, "footer", help_col, "Accessibility")["sitemap_parent"] is None
+    # A parent page that's being removed is skipped for the sitemap.
+    ts = conn.execute("SELECT updated_at FROM pages WHERE id = ?", (pid(conn, "/admissions"),)).fetchone()[0]
+    rules.apply_changes(conn, pid(conn, "/admissions"), {"decision": "delete"}, ts)
+    assert nav.add_new_page(conn, "main", adm_entry, "Tours")["sitemap_parent"] is None
+    # A spot the menu can't take is refused before anything is made.
+    before = conn.execute("SELECT count(*) FROM pages").fetchone()[0]
+    with pytest.raises(rules.RuleError, match="levels deep"):
+        nav.add_new_page(conn, "footer", item_id(conn, "footer", "Accessibility"), "Too deep")
+    assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == before
+    with pytest.raises(rules.RuleError, match="name"):
+        nav.add_new_page(conn, "main", None, "   ")

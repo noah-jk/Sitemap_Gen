@@ -25,17 +25,23 @@ Each client project is its own SQLite file. The tabs follow the workflow:
   pages, dropped from the navigation…), and filters, sort, and columns save as named views. Paths link
   to the live page. Click a label for the **detail panel**: every crawl column, traffic, where the page
   sits in the new sitemap, and editable decision fields; ↑/↓ (or J/K) step through rows.
+  **Planning** fields (owner, writer, priority, suggested content, and a **New URL**) are in the panel
+  and in optional grid columns; the "New pages" view gathers pages that aren't on the current site.
 - **Sitemap:** every kept page, nested as it will be in the new site, as a list or a **map** (top
   three levels as columns, with a page count under each). Drag to reorder and re-nest, add new pages,
-  double-click a name to rename it, and click a page-type tag to change it.
+  double-click a name to rename it, and click a page-type tag to change it. New pages get a planned URL
+  from where they sit (parent's URL + their name) that follows them as they move, until one is typed;
+  existing pages keep theirs unless given a new one.
 - **Navigation:** the main menu, utility nav, and footer, built separately from the sitemap by adding
-  what belongs (here, from the Sitemap tab, or in bulk from the grid, with sub-pages if wanted). List
+  what belongs (here, from the Sitemap tab, or in bulk from the grid, with sub-pages if wanted); a
+  page that doesn't exist yet can be created right from **Add pages…**, and goes into the sitemap too. List
   or map view, drag within and between menus or use **Move to…**, shorter labels, headings, and
   link/button chips. **Remove** takes an entry and everything under it.
 - **Prototype:** a sandboxed preview of the site built from the sitemap and menus, with menu style and
   depth settings that save as you change them. Every page type (landing, listing, list, article,
   form) has its own wireframe. The zip download is noindexed and ready to upload to S3.
-- **Exports:** the redirect map (decided pages only; old redirects re-pointed past removed pages), the
+- **Exports:** the redirect map (decided pages, plus pages moving to a new URL; redirects into new
+  pages use their planned URL, and old redirects are re-pointed past removed or moved pages), the
   content audit CSV for the client, and a Markdown sitemap the generator can read.
 
 Every edit can be undone (**Undo**/**Redo** in the top bar, Ctrl/⌘+Z, and a **History** list), so

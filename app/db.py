@@ -179,6 +179,15 @@ PROJECT_MIGRATIONS: List[str] = [
       DELETE FROM actions WHERE id <= NEW.id - 200;
     END;
     """,
+    """
+    -- Planning: a page's URL on the new site when it differs from today's (new pages get one from
+    -- the sitemap when this is empty), and who and what it needs.
+    ALTER TABLE pages ADD COLUMN new_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE pages ADD COLUMN owner TEXT NOT NULL DEFAULT '';
+    ALTER TABLE pages ADD COLUMN writer TEXT NOT NULL DEFAULT '';
+    ALTER TABLE pages ADD COLUMN priority TEXT NOT NULL DEFAULT '' CHECK(priority IN ('', 'high', 'medium', 'low'));
+    ALTER TABLE pages ADD COLUMN suggested_content TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 
