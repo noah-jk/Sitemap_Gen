@@ -156,7 +156,8 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .nav-list { min-height: 6px; }
 .menu-panel > .nav-list { padding-left: 0; border-top: 1px solid var(--line); }
 .results li button[aria-pressed="true"] { background: var(--paper); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
-@media (min-width: 1100px) { .menus { grid-template-columns: 3fr 2fr; } .menu-panel[data-menu="main"] { grid-row: span 2; } }
+/* Navigation list: the main menu gets the full width; utility nav and footer sit side by side below it */
+@media (min-width: 900px) { .menus { grid-template-columns: 1fr 1fr; } .menu-panel[data-menu="main"] { grid-column: 1 / -1; } }
 .tag.menu-tag { color: var(--accent); border-color: var(--accent); background: none; }
 .proto-frame { position: relative; }
 .building { position: absolute; inset: 1px; display: flex; align-items: center; justify-content: center; gap: 10px;

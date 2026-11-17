@@ -245,7 +245,6 @@
     $("nav-map").hidden = view !== "map";
     $("collapse-all").hidden = view !== "list";
     $("expand-all").hidden = view !== "list";
-    document.querySelector("main").classList.toggle("full", view === "map");
     document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
     if (view === "map") renderMap(); else renderLists();
   }
