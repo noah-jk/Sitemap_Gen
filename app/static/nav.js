@@ -37,47 +37,64 @@
     return r;
   }
 
-  // ---- rendering ---------------------------------------------------------------
+  // ---- shared by both views ----------------------------------------------------
+
+  // [text, title, handler] for every action an entry offers.
+  function actionsFor(item, siblings, index, menu, parentId, words) {
+    const out = [];
+    if (index > 0) out.push([words.up, `Move ${item.display} ${words.upTitle || "up"}`,
+      () => act(send("POST", "/nav/move", {id: item.id, menu, parent_id: parentId, index: index - 1}), "Moved.")]);
+    if (index < siblings.length - 1) out.push([words.down, `Move ${item.display} ${words.downTitle || "down"}`,
+      () => act(send("POST", "/nav/move", {id: item.id, menu, parent_id: parentId, index: index + 1}), "Moved.")]);
+    out.push(["Move to…", `Move ${item.display} to another menu or under another entry`, () => openMoveTo(item, menu)]);
+    out.push(["Add pages…", `Add pages under ${item.display}`, () => openAdd(menu, item.id, item.display)]);
+    if (!item.heading) {
+      out.push(["Pull in sub-pages", `Add ${item.display}'s sub-pages from the sitemap that aren't under it yet (including ones removed earlier)`,
+        () => act(send("POST", `/nav/${item.id}/subpages`, {depth: 1}), "").then((r) => {
+          if (r.ok) status.textContent = r.data.added ? `Added ${r.data.added} sub-page${r.data.added === 1 ? "" : "s"}.`
+            : "No sub-pages to add: they're all there already.";
+        })]);
+    }
+    if (menu === "main") out.push(["Add heading", `Add a heading under ${item.display}`, () => addHeading(menu, item.id)]);
+    out.push(["Rename", `Rename ${item.display}`, () => rename(item)]);
+    if (menu === "main" && parentId === null) {
+      out.push([item.is_button ? "Unmake button" : "Make button", "Show as a button in the main menu",
+        () => act(send("PATCH", `/nav/${item.id}`, {is_button: !item.is_button}),
+          item.is_button ? "No longer a button." : "Now a button.")]);
+    }
+    out.push(["Remove", `Remove ${item.display} from this menu`, () => {
+      if (window.confirm(`Remove “${item.display}” from this menu? The page itself isn't affected.`)) {
+        act(send("DELETE", `/nav/${item.id}`), "Removed from the menu.");
+      }
+    }]);
+    return out;
+  }
+
+  function itemTags(item) {
+    const out = [];
+    if (item.heading) out.push(el("span", {class: "tag", text: "heading"}));
+    if (item.is_button) out.push(el("span", {class: "tag", text: "button"}));
+    if (item.is_new) out.push(el("span", {class: "tag", text: "new page"}));
+    return out;
+  }
+
+  const entriesText = (n) => `${n.toLocaleString()} entr${n === 1 ? "y" : "ies"}`;
+  const below = (item) => item.children.reduce((n, c) => n + 1 + below(c), 0);
+
+  // ---- list view ---------------------------------------------------------------
 
   function row(item, siblings, index, menu, parentId, level) {
     const li = el("li", {"data-id": item.id});
-    const label = el("span", {class: "tree-label"}, el("span", {text: item.display}));
-    if (item.heading) label.append(el("span", {class: "tag", text: "heading"}));
-    if (item.is_button) label.append(el("span", {class: "tag", text: "button"}));
-    if (item.is_new) label.append(el("span", {class: "tag", text: "new page"}));
+    const label = el("span", {class: "tree-label"}, el("span", {text: item.display}), ...itemTags(item));
     const info = [];
     if (item.label && item.page_label) info.push(`page: ${item.page_label}`);
     if (item.url_path) info.push(item.url_path);
 
     const actions = el("span", {class: "tree-actions"});
-    const add = (text, title, fn) => {
+    actionsFor(item, siblings, index, menu, parentId, {up: "↑", down: "↓"}).forEach(([text, title, fn]) => {
       const b = el("button", {type: "button", class: "link", title, text});
       b.addEventListener("click", fn);
       actions.append(b);
-    };
-    add("↑", `Move ${item.display} up`, () => index > 0 &&
-      act(send("POST", "/nav/move", {id: item.id, menu, parent_id: parentId, index: index - 1}), "Moved up."));
-    add("↓", `Move ${item.display} down`, () => index < siblings.length - 1 &&
-      act(send("POST", "/nav/move", {id: item.id, menu, parent_id: parentId, index: index + 1}), "Moved down."));
-    add("Add pages…", `Add pages under ${item.display}`, () => openAdd(menu, item.id, item.display));
-    if (!item.heading) {
-      add("Pull in sub-pages", `Add ${item.display}'s sub-pages from the sitemap that aren't under it yet (including ones removed earlier)`,
-        () => act(send("POST", `/nav/${item.id}/subpages`, {depth: 1}), "").then((r) => {
-          if (r.ok) status.textContent = r.data.added ? `Added ${r.data.added} sub-page${r.data.added === 1 ? "" : "s"}.`
-            : "No sub-pages to add: they're all there already.";
-        }));
-    }
-    if (menu === "main") add("Add heading", `Add a heading under ${item.display}`, () => addHeading(menu, item.id));
-    add("Rename", `Rename ${item.display}`, () => rename(item));
-    if (menu === "main" && parentId === null) {
-      add(item.is_button ? "Unmake button" : "Make button", "Show as a button in the main menu",
-        () => act(send("PATCH", `/nav/${item.id}`, {is_button: !item.is_button}),
-          item.is_button ? "No longer a button." : "Now a button."));
-    }
-    add("Remove", `Remove ${item.display} from this menu`, () => {
-      if (window.confirm(`Remove “${item.display}” from this menu? The page itself isn't affected.`)) {
-        act(send("DELETE", `/nav/${item.id}`), "Removed from the menu.");
-      }
     });
 
     const parts = [el("span", {class: "tree-handle", title: "Drag to move", "aria-hidden": "true", text: "⠿"})];
@@ -106,10 +123,35 @@
     return ul;
   }
 
+  const VIEW_KEY = `nav-view-${document.body.dataset.slug}`;
+  let view = new URLSearchParams(window.location.search).get("view");
+  try { view = view || localStorage.getItem(VIEW_KEY); } catch (e) { /* private mode */ }
+  view = view === "map" ? "map" : "list";
+  let menus = null;
+
+  document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => {
+    view = b.dataset.view;
+    try { localStorage.setItem(VIEW_KEY, view); } catch (e) { /* ignore */ }
+    render();
+  }));
+
   async function load() {
-    const data = await (await fetch(api("/nav"))).json();
+    menus = (await (await fetch(api("/nav"))).json()).menus;
+    render();
+  }
+
+  function render() {
     sortables.forEach((s) => s.destroy());
     sortables = [];
+    $("nav-lists").hidden = view !== "list";
+    $("nav-map").hidden = view !== "map";
+    document.querySelector("main").classList.toggle("full", view === "map");
+    document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+    if (view === "map") renderMap(); else renderLists();
+  }
+
+  function renderLists() {
+    const data = {menus};
     document.querySelectorAll(".menu-panel").forEach((panel) => {
       const menu = panel.dataset.menu;
       const fresh = list(data.menus[menu], menu, null, 1);
@@ -117,6 +159,109 @@
       panel.querySelector(":scope > .nav-list").replaceWith(fresh);
     });
   }
+
+  // ---- map view: each menu as columns (the top three levels), like a mega menu ----
+
+  // Laid out the way a page shows them: utility nav at the top, then the main menu, then the footer.
+  const MENU_TITLES = {utility: "Utility nav", main: "Main menu", footer: "Footer"};
+
+  function entryCard(item, level) {
+    const n = below(item);
+    const meta = [];
+    if (n) meta.push(el("span", {class: "map-count", title: "Entries below this one in the menu", text: entriesText(n)}));
+    else if (level === 1) meta.push(el("span", {class: "map-count muted", text: "Nothing below"}));
+    if (item.label && item.page_label) meta.push(el("span", {class: "muted small", text: `${n ? " · " : ""}page: ${item.page_label}`}));
+    const flag = item.problem
+      ? el("span", {class: "problem-flag", title: item.problem, "aria-label": `Problem: ${item.problem}`, text: "!"}) : null;
+    return {label: item.display, meta, tags: itemTags(item), flag};
+  }
+
+  function renderMap() {
+    const boards = Object.keys(MENU_TITLES).map((menu) => {
+      const items = menus[menu];
+      const addPages = el("button", {type: "button", text: "Add pages…"});
+      addPages.addEventListener("click", () => openAdd(menu, null, null));
+      const addHead = el("button", {type: "button", text: menu === "footer" ? "Add column heading" : "Add heading"});
+      addHead.addEventListener("click", () => addHeading(menu, null));
+      const total = items.reduce((n, i) => n + 1 + below(i), 0);
+      const head = el("div", {class: "menu-map-head"},
+        el("h2", {text: MENU_TITLES[menu]}),
+        el("span", {class: "muted small", text: total ? `${entriesText(total)} · ${items.length} at the top` : "Empty"}),
+        el("span", {class: "toolbar"}, addPages, addHead));
+      const {row, drop} = MapBoard.board({
+        roots: items, card: entryCard, group: "navmap", root: $("nav-map"), data: {menu},
+        emptyText: "Drop entries here", emptyBoard: "Empty. Add pages or a heading, or drag entries here from another menu.", sortables,
+        actions: (item, siblings, index, horizontal) => {
+          const parentId = findParent(item.id);
+          return actionsFor(item, siblings, index, menu, parentId, horizontal
+            ? {up: "Move left", down: "Move right", upTitle: "left", downTitle: "right"} : {up: "Move up", down: "Move down"});
+        },
+        onMove: ({id, parentId, index, to}) => act(send("POST", "/nav/move", {id, menu: to.menu, parent_id: parentId, index}), "Moved."),
+      });
+      return el("section", {class: "menu-map", "data-menu": menu}, head, drop, items.length ? el("div", {class: "map-board"}, row) : "");
+    });
+    $("nav-map").replaceChildren(...boards);
+  }
+
+  function findParent(id) {
+    const search = (items, parent) => {
+      for (const i of items) {
+        if (i.id === id) return {found: true, parent};
+        const r = search(i.children, i.id);
+        if (r.found) return r;
+      }
+      return {found: false};
+    };
+    for (const m of Object.keys(menus)) {
+      const r = search(menus[m], null);
+      if (r.found) return r.parent;
+    }
+    return null;
+  }
+
+  // ---- move to: any menu, any spot, without dragging --------------------------
+
+  const MAX_LEVELS = {main: 4, utility: 2, footer: 2};
+  let movingEntry = null;
+
+  function openMoveTo(item, fromMenu) {
+    movingEntry = item;
+    const height = (i) => 1 + Math.max(0, ...i.children.map(height));
+    const h = height(item);
+    const select = $("me-dest");
+    select.replaceChildren();
+    ["main", "utility", "footer"].forEach((menu) => {
+      const group = el("optgroup", {label: MENU_TITLES[menu]});
+      group.append(el("option", {value: `${menu}:`, text: `${MENU_TITLES[menu]}: top level`}));
+      const walk = (items, trail, level) => items.forEach((i) => {
+        if (i.id === item.id) return;  // not into itself or anything below it
+        const path = trail.concat(i.display);
+        if (level + h <= MAX_LEVELS[menu]) group.append(el("option", {value: `${menu}:${i.id}`, text: `${"\u00a0\u00a0".repeat(level)}${path.join(" › ")}`}));
+        walk(i.children, path, level + 1);
+      });
+      walk(menus[menu], [], 1);
+      select.append(group);
+    });
+    const parent = findParent(item.id);
+    select.value = `${fromMenu}:${parent === null ? "" : parent}`;
+    $("me-title").textContent = `Move “${item.display}”`;
+    $("me-hint").textContent = h > 1 ? `Everything under it (${entriesText(below(item))}) moves with it. It goes at the end of the spot you pick.`
+      : "It goes at the end of the spot you pick; drag it afterwards to fine-tune the order.";
+    $("me-error").textContent = "";
+    $("move-entry-dialog").showModal();
+    select.focus();
+  }
+
+  $("me-cancel").addEventListener("click", () => $("move-entry-dialog").close());
+  $("me-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const [menu, parent] = $("me-dest").value.split(":");
+    const r = await send("POST", "/nav/move", {id: movingEntry.id, menu, parent_id: parent ? Number(parent) : null, index: 100000});
+    if (!r.ok) { $("me-error").textContent = r.data.detail || "That didn't work."; return; }
+    $("move-entry-dialog").close();
+    status.textContent = `Moved “${movingEntry.display}”.`;
+    await load();
+  });
 
   // ---- actions -----------------------------------------------------------------
 
