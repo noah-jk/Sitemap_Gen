@@ -18,6 +18,19 @@
     return node;
   }
 
+  // The path links to the page on the live site, in a new tab. Only http(s) addresses from the
+  // crawl become links; a click on the link doesn't select the row.
+  function pathFormatter(cell) {
+    const path = cell.getValue();
+    if (!path) return el("span", {class: "muted", text: "(new page)"});
+    const url = cell.getData().current_url || "";
+    if (!/^https?:\/\//i.test(url)) return document.createTextNode(path);  // never a string: Tabulator would parse it as HTML
+    const a = el("a", {href: url, target: "_blank", rel: "noopener noreferrer", class: "live-link",
+      title: `Open ${url} in a new tab`, text: path});
+    a.addEventListener("click", (e) => e.stopPropagation());
+    return a;
+  }
+
   async function send(method, path, payload) {
     let resp;
     try {
@@ -108,6 +121,7 @@
   // ---- grid ------------------------------------------------------------------
 
   const choices = [""].concat(DISPOSITIONS);
+  const TYPE_CHOICES = {"": "Auto", landing: "Landing", listing: "Listing", list: "List", article: "Article", form: "Form"};
   const filterChoices = {"": "", "(blank)": "(blank)"};
   DISPOSITIONS.forEach((c) => { filterChoices[c] = c; });
 
@@ -156,7 +170,7 @@
        width: 40, frozen: true},
       {title: "", field: "problem", formatter: problemFormatter, width: 34, hozAlign: "center", headerSort: false},
       {title: "Label", field: "label", formatter: "plaintext", headerFilter: "input", minWidth: 200},
-      {title: "Path", field: "url_path", formatter: "plaintext", headerFilter: "input", minWidth: 200},
+      {title: "Path", field: "url_path", formatter: pathFormatter, headerFilter: "input", minWidth: 200},
       {title: "HTTP", field: "status_code", width: 72, hozAlign: "right"},
       {title: "Sessions", field: "sessions", width: 96, hozAlign: "right", formatter: "money",
        formatterParams: {precision: 0, thousand: ","}, headerSortStartingDir: "desc"},
@@ -166,6 +180,10 @@
       {title: "Collection", field: "collection", width: 104, formatter: "plaintext", headerFilter: "input"},
       {title: "Parent", field: "parent_label", formatter: "plaintext", headerFilter: "input", minWidth: 140},
       {title: "Menus", field: "menus", formatter: "plaintext", headerFilter: "input", width: 110},
+      {title: "Page type", field: "page_type", width: 110, editor: "list", editorParams: {values: TYPE_CHOICES},
+       formatter: (cell) => cell.getValue() ? TYPE_CHOICES[cell.getValue()] : el("span", {class: "muted", text: "Auto"}),
+       headerFilter: "list", headerFilterParams: {values: Object.assign({"": "", "(blank)": "Auto"},
+         Object.fromEntries(Object.entries(TYPE_CHOICES).filter(([k]) => k)))}, headerFilterFunc: "="},
       disposition("Recommendation", "recommendation"),
       disposition("Final Decision", "decision"),
       {title: "Redirect to", field: "redirect_label", formatter: redirectFormatter, headerFilter: "input",
@@ -357,9 +375,10 @@
     const field = $("bulk-field").value;
     const values = field === "status" ? ["todo", "done"]
       : field === "parent_id" ? ["pick", "top"] : field === "menu" ? ["add"]
+      : field === "page_type" ? Object.keys(TYPE_CHOICES)
       : ["", "keep", "delete", "review", "combine"];
-    const names = {"": "(clear)", combine: "combine into…", pick: "a page I choose…", top: "the top level",
-      add: "a menu I choose…"};
+    const names = Object.assign({"": "(clear)", combine: "combine into…", pick: "a page I choose…",
+      top: "the top level", add: "a menu I choose…"}, field === "page_type" ? TYPE_CHOICES : {});
     bulkValue.replaceChildren(...values.map((v) => el("option", {value: v, text: names[v] || v})));
   }
   $("bulk-field").addEventListener("change", fillBulkValues);

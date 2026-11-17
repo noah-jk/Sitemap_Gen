@@ -45,7 +45,46 @@
     return r;
   }
 
-  // ---- rendering ---------------------------------------------------------------
+  // ---- shared by both views ----------------------------------------------------
+
+  const MENU_TAGS = {main: "main menu", utility: "utility", footer: "footer"};
+  const TYPES = {landing: "Landing", listing: "Listing", list: "List", article: "Article", form: "Form"};
+
+  function tags(node) {
+    const out = [];
+    if (node.is_new) out.push(el("span", {class: "tag", text: "new"}));
+    node.menus.forEach((m) => out.push(el("span", {class: "tag menu-tag", text: MENU_TAGS[m]})));
+    out.push(el("span", {class: "tag", title: node.page_type ? "Page type (set in the Pages grid)" :
+      "Page type worked out from the sitemap; set it in the Pages grid to override",
+      text: TYPES[node.type] + (node.page_type ? "" : " (auto)")}));
+    return out;
+  }
+
+  function pagesText(n) {
+    return `${n.toLocaleString()} page${n === 1 ? "" : "s"}`;
+  }
+
+  // [text, title, handler] for every action a page offers, in both views.
+  function actionsFor(node, siblings, index, words) {
+    const list = [];
+    if (index > 0) list.push([words.up, `Move ${node.label} ${words.upTitle || "up"}`,
+      () => act(send("POST", "/tree/move", {id: node.id, parent_id: node.parentId, index: index - 1}), "Moved.")]);
+    if (index < siblings.length - 1) list.push([words.down, `Move ${node.label} ${words.downTitle || "down"}`,
+      () => act(send("POST", "/tree/move", {id: node.id, parent_id: node.parentId, index: index + 1}), "Moved.")]);
+    list.push(["Move…", `Move ${node.label} under another page`, () => openMove(node)]);
+    list.push(["Add sub-page", `Add a page under ${node.label}`, () => addPage(node.id)]);
+    list.push(["Rename", `Rename ${node.label}`, () => rename(node)]);
+    list.push(["Add to menu…", `Add ${node.label} to a menu`, () => MenuPicker.open({
+      api, csrf, title: `Add “${node.label}” to a menu`, target: {page_ids: [node.id]},
+      onDone: (added, menuName) => {
+        status.textContent = added ? `Added to the ${menuName}.` : `Already in that spot in the ${menuName}.`;
+        load();
+      }})]);
+    if (node.is_new) list.push(["Remove", `Remove ${node.label}`, () => removePage(node)]);
+    return list;
+  }
+
+  // ---- list view ---------------------------------------------------------------
 
   function nodeRow(node, siblings, index) {
     const li = el("li", {"data-id": node.id});
@@ -63,31 +102,14 @@
     if (node.descendants) meta.push(`${node.descendants.toLocaleString()} below`);
     if (node.collection_count) meta.push(`incl. ${node.collection_count.toLocaleString()} collection items`);
     if (node.absorbs) meta.push(`absorbs ${node.absorbs}`);
-    const label = el("span", {class: "tree-label"}, el("span", {text: node.label}));
-    if (node.is_new) label.append(el("span", {class: "tag", text: "new"}));
-    const MENU_TAGS = {main: "main menu", utility: "utility", footer: "footer"};
-    node.menus.forEach((m) => label.append(el("span", {class: "tag menu-tag", text: MENU_TAGS[m]})));
+    const label = el("span", {class: "tree-label"}, el("span", {text: node.label}), ...tags(node));
 
     const actions = el("span", {class: "tree-actions"});
-    const add = (text, title, fn) => {
+    actionsFor(node, siblings, index, {up: "↑", down: "↓"}).forEach(([text, title, fn]) => {
       const b = el("button", {type: "button", class: "link", title, text});
       b.addEventListener("click", fn);
       actions.append(b);
-    };
-    add("↑", `Move ${node.label} up`, () => index > 0 &&
-      act(send("POST", "/tree/move", {id: node.id, parent_id: node.parentId, index: index - 1}), "Moved up."));
-    add("↓", `Move ${node.label} down`, () => index < siblings.length - 1 &&
-      act(send("POST", "/tree/move", {id: node.id, parent_id: node.parentId, index: index + 1}), "Moved down."));
-    add("Move…", `Move ${node.label} under another page`, () => openMove(node));
-    add("Add sub-page", `Add a page under ${node.label}`, () => addPage(node.id));
-    add("Rename", `Rename ${node.label}`, () => rename(node));
-    add("Add to menu…", `Add ${node.label} to a menu`, () => MenuPicker.open({
-      api, csrf, title: `Add “${node.label}” to a menu`, target: {page_ids: [node.id]},
-      onDone: (added, menuName) => {
-        status.textContent = added ? `Added to the ${menuName}.` : `Already in that spot in the ${menuName}.`;
-        load();
-      }}));
-    if (node.is_new) add("Remove", `Remove ${node.label}`, () => removePage(node));
+    });
 
     const row = el("div", {class: "tree-row"},
       el("span", {class: "tree-handle", title: "Drag to move", "aria-hidden": "true", text: "⠿"}),
@@ -117,15 +139,111 @@
   }
 
   let roots = [];
+  const VIEW_KEY = `tree-view-${slug}`;
+  let view = new URLSearchParams(window.location.search).get("view");
+  try { view = view || localStorage.getItem(VIEW_KEY); } catch (e) { /* private mode */ }
+  view = view === "map" ? "map" : "list";
+
   function render() {
     sortables.forEach((s) => s.destroy());
     sortables = [];
+    const total = roots.reduce((n, r) => n + 1 + r.descendants, 0);
+    $("list-view").hidden = view !== "list";
+    $("map").hidden = view !== "map";
+    $("collapse-all").hidden = view !== "list";
+    document.querySelector("main").classList.toggle("full", view === "map");
+    document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+    if (view === "map") {
+      renderMap(total);
+      return;
+    }
     const top = list(roots, null);
     top.id = "tree";
     $("tree").replaceWith(top);
-    const total = roots.reduce((n, r) => n + 1 + r.descendants, 0);
-    $("tree-total").textContent = `${total.toLocaleString()} pages`;
+    $("tree-total").textContent = pagesText(total);
   }
+
+  document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => {
+    view = b.dataset.view;
+    try { localStorage.setItem(VIEW_KEY, view); } catch (e) { /* ignore */ }
+    render();
+  }));
+
+  // ---- map view: the top three levels as an org chart, with counts for what's below ----
+
+  // While dragging, drop areas show at the end of each column and inside each level-2 card.
+  const dragging = (on) => () => $("map").classList.toggle("map-dragging", on);
+
+  function onDrop(evt) {
+    dragging(false)();
+    if (evt.from === evt.to && evt.oldDraggableIndex === evt.newDraggableIndex) return;
+    const parent = evt.to.dataset.parent;
+    act(send("POST", "/tree/move", {id: Number(evt.item.dataset.id), parent_id: parent ? Number(parent) : null,
+      index: evt.newDraggableIndex}), "Moved.");
+  }
+
+  function cardMenu(node, siblings, index, horizontal) {
+    const words = horizontal ? {up: "Move left", down: "Move right", upTitle: "left", downTitle: "right"}
+      : {up: "Move up", down: "Move down"};
+    const items = el("div", {class: "map-menu-items"});
+    actionsFor(node, siblings, index, words).forEach(([text, title, fn]) => {
+      const b = el("button", {type: "button", class: "link", title, text});
+      b.addEventListener("click", () => { menu.open = false; fn(); });
+      items.append(b);
+    });
+    const menu = el("details", {class: "map-menu"},
+      el("summary", {"aria-label": `Actions for ${node.label}`, title: "Actions", text: "⋯"}), items);
+    return menu;
+  }
+
+  function mapCard(node, siblings, index, level) {
+    const card = el("div", {class: `map-card map-l${level}`, "data-id": node.id});
+    const head = el("div", {class: "map-head"},
+      el("span", {class: "map-grip", title: "Drag to move", "aria-hidden": "true", text: "⠿"}),
+      el("span", {class: "map-label", text: node.label}),
+      cardMenu(node, siblings, index, level === 1));
+    const below = node.descendants
+      ? el("span", {class: "map-count", title: "Pages below this one", text: pagesText(node.descendants)})
+      : el("span", {class: "map-count muted", text: level === 1 ? "No sub-pages" : ""});
+    const extra = node.absorbs ? [el("span", {class: "muted small", text: ` · absorbs ${node.absorbs}`})] : [];
+    card.append(head, el("div", {class: "map-meta"}, below, ...extra), el("div", {class: "map-tags"}, ...tags(node)));
+    if (level === 2) card.append(mapList(node.children, node.id, 3));
+    return card;
+  }
+
+  function mapList(nodes, parentId, level) {
+    const list = el("div", {class: `map-list map-list-l${level}`, "data-parent": String(parentId)});
+    nodes.forEach((n, i) => list.append(mapCard(n, nodes, i, level)));
+    if (!nodes.length && level === 2) list.append(el("div", {class: "map-empty muted small", text: "Drop pages here"}));
+    sortables.push(Sortable.create(list, {
+      group: "map", handle: ".map-grip", draggable: ".map-card", filter: ".map-empty, .map-menu",
+      preventOnFilter: false, animation: 120, fallbackOnBody: true, swapThreshold: 0.65, emptyInsertThreshold: 12,
+      onStart: dragging(true), onEnd: onDrop,
+    }));
+    return list;
+  }
+
+  function renderMap(total) {
+    const row = el("div", {class: "map-row", "data-parent": ""});
+    roots.forEach((n, i) => {
+      const col = el("section", {class: "map-col", "data-id": n.id, "aria-label": n.label});
+      col.append(mapCard(n, roots, i, 1), mapList(n.children, n.id, 2));
+      row.append(col);
+    });
+    sortables.push(Sortable.create(row, {
+      group: "map-top", handle: ".map-l1 > .map-head > .map-grip", draggable: ".map-col", direction: "horizontal",
+      animation: 120, onStart: dragging(true), onEnd: onDrop,
+    }));
+    const addTop = el("button", {type: "button", class: "map-add", text: "+ Add top-level page"});
+    addTop.addEventListener("click", () => addPage(null));
+    const home = el("div", {class: "map-home"}, el("strong", {text: "Home"}),
+      el("span", {class: "muted small", text: ` ${pagesText(total)} · ${roots.length} top-level`}));
+    $("map").replaceChildren(home, el("div", {class: "map-board"}, row, addTop));
+  }
+
+  document.addEventListener("click", (e) => {  // close an open card menu when clicking elsewhere
+    document.querySelectorAll(".map-menu[open]").forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+  });
 
   async function load() {
     const resp = await fetch(api("/tree"));

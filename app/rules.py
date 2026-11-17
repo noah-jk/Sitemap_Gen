@@ -12,10 +12,11 @@ REMOVED = ("delete", "combine", "split")  # pages that won't exist after launch
 _REM = "('delete','combine','split')"
 STATUSES = ("todo", "done")
 MAX_NOTES = 5000
-SCALAR_FIELDS = ("recommendation", "decision", "status", "notes", "redirect_to", "label", "is_button")
+SCALAR_FIELDS = ("recommendation", "decision", "status", "notes", "redirect_to", "label", "is_button", "page_type")
+PAGE_TYPES = ("landing", "listing", "list", "article", "form")
 MAX_LABEL = 200
 EDITABLE = set(SCALAR_FIELDS) | {"content_targets"}
-BULK_EDITABLE = {"recommendation", "decision", "status", "redirect_to", "parent_id"}
+BULK_EDITABLE = {"recommendation", "decision", "status", "redirect_to", "parent_id", "page_type"}
 
 _CHECKS = [
     ("p.e IN ('combine','split') AND p.redirect_to IS NULL",
@@ -81,6 +82,10 @@ def _clean(changes: dict, allowed: set) -> dict:
             value = " ".join(str(value or "").split())[:MAX_LABEL]
             if not value:
                 raise RuleError(["Give the page a name."])
+        elif field == "page_type":
+            value = value or ""
+            if value not in PAGE_TYPES + ("",):
+                raise RuleError([f"Page type must be one of: {', '.join(PAGE_TYPES)} (or empty for auto)."])
         elif field == "is_button":
             if not isinstance(value, bool):
                 raise RuleError(["is_button must be true or false."])

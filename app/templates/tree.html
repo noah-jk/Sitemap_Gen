@@ -5,20 +5,24 @@
 {% block content %}
 <div class="tree-head">
   <h1>Sitemap</h1>
-  <p class="muted small">The sitemap: every page being kept, nested as it will be in the new site. Menus are
-    separate (see the Navigation tab); tags show which menus a page is in, and <strong>Add to menu…</strong> puts it in one. Drag the ⠿ handle to reorder or
-    move a page (its sub-pages go with it), or use <strong>Move…</strong>. Open a page with ▸ to drop pages into it.
-    Removed pages are left out and their sub-pages move up; news and calendar items are counted on their parent.</p>
+  <p class="muted small">Every page being kept, nested as it will be in the new site. Drag the ⠿ handle to reorder or
+    move a page (its sub-pages go with it), or use <strong>Move…</strong>. <strong>Map</strong> shows the top three levels
+    as a chart, with a count of the pages under each. Menus are separate (Navigation tab); tags show which menus a page
+    is in. Removed pages are left out and their sub-pages move up; news and calendar items are counted on their parent.</p>
   <div class="toolbar">
+    <span class="segmented" role="group" aria-label="View">
+      <button type="button" data-view="list" aria-pressed="true">List</button><button type="button" data-view="map" aria-pressed="false">Map</button>
+    </span>
     <button type="button" id="add-top">Add top-level page</button>
     <button type="button" id="collapse-all">Collapse all</button>
     <span id="tree-status" role="status" aria-live="polite" class="muted"></span>
   </div>
 </div>
-<div class="tree-root">
+<div class="tree-root" id="list-view">
   <div class="tree-home"><strong>Home</strong> <span class="muted" id="tree-total"></span></div>
   <ul class="tree-list" id="tree" data-parent=""></ul>
 </div>
+<div class="map" id="map" hidden></div>
 
 <dialog id="move-dialog" aria-labelledby="mv-title">
   <form id="mv-form">

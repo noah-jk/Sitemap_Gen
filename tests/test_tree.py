@@ -102,7 +102,7 @@ def test_prototype_from_database(conn):
     assert "admissions/how-to-apply/first-year-students/index.html" in files
     assert files["robots.txt"].startswith("User-agent: *")
     assert '<meta name="robots" content="noindex, nofollow">' in files["index.html"]
-    assert "Plus 2 more pages below this one" in files["news/index.html"]
+    assert "Listing page" in files["news/index.html"] and "2 items" in files["news/index.html"]  # auto type
     assert "accessibility/index.html" in files and "apply-now/index.html" in files
     assert "&lt;Life&gt;" in files["campus-life/index.html"] and "<Life>" not in files["campus-life/index.html"]
     assert not any(p.startswith(("old-page", "gone")) for p in files)
@@ -121,3 +121,20 @@ def test_stamp_changes_with_tree_and_settings(conn):
     after_move = tree.stamp(conn)
     conn.execute("UPDATE settings SET nav_style = 'sidebar'")
     assert len({before, after_move, tree.stamp(conn)}) == 3
+
+
+def test_auto_page_types_follow_the_sitemap(conn):
+    types = {n.label: n.type for n, _, _ in tree.walk(tree.load(conn))}
+    assert types["News"] == "listing"            # has news items under it
+    assert types["Admissions"] == "landing"      # has sub-pages
+    assert types["Contact Us"] == "form"         # form-like label
+    assert types["Campus <Life>"] == "article"
+    campus = pid(conn, "/campus-life")
+    tree.move(conn, pid(conn, "/about/history"), campus, 0)
+    assert {n.label: n.type for n, _, _ in tree.walk(tree.load(conn))}["Campus <Life>"] == "landing"
+    decide(conn, "/campus-life", page_type="list")
+    nodes = {n.label: n for n, _, _ in tree.walk(tree.load(conn))}
+    assert nodes["Campus <Life>"].type == "list" and nodes["Campus <Life>"].to_dict()["page_type"] == "list"
+    assert "List page" in tree.render_files(conn)["campus-life/index.html"]
+    with pytest.raises(rules.RuleError, match="Page type must be"):
+        decide(conn, "/campus-life", page_type="blog")
