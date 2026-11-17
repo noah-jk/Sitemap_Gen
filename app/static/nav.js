@@ -61,10 +61,21 @@
     }
     if (menu === "main") out.push(["Add heading", `Add a heading under ${item.display}`, () => addHeading(menu, item.id)]);
     out.push(["Rename", `Rename ${item.display} (or double-click its name)`, () => InlineEdit.startFor(item.id)]);
-    out.push(["Remove", `Remove ${item.display} from this menu (the page itself isn't affected)`, async () => {
+    // Remove takes everything under the entry with it; the second action keeps the sub-entries, which move up.
+    const n = below(item);
+    out.push(["Remove", n ? `Remove ${item.display} and the ${entriesText(n)} under it from this menu (the pages themselves aren't affected)`
+      : `Remove ${item.display} from this menu (the page itself isn't affected)`, async () => {
       const r = await act(send("DELETE", `/nav/${item.id}`), "Removed from the menu.");
-      if (r.ok && window.AppHistory) AppHistory.done(`Removed “${item.display}” from the ${MENU_NAMES[menu]}.`);
+      if (r.ok && window.AppHistory) {
+        AppHistory.done(`Removed “${item.display}”${n ? ` and ${entriesText(n)} under it` : ""} from the ${MENU_NAMES[menu]}.`);
+      }
     }]);
+    if (n) {
+      out.push(["Remove, keep its sub-entries", `Remove only ${item.display}; what's under it moves up into its place`, async () => {
+        const r = await act(send("DELETE", `/nav/${item.id}?keep_children=1`), "Removed; its sub-entries moved up.");
+        if (r.ok && window.AppHistory) AppHistory.done(`Removed “${item.display}”; its sub-entries moved up.`);
+      }]);
+    }
     return out;
   }
 

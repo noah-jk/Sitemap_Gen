@@ -92,8 +92,23 @@ def test_labels_buttons_and_removal(conn):
     child = item_id(conn, "main", "First-Year Students")
     with pytest.raises(rules.RuleError, match="Only top-level main menu entries"):
         nav.update(conn, child, is_button=True)
-    nav.remove(conn, apply)                            # its child moves up into its place
+    nav.remove(conn, apply, keep_children=True)        # its child moves up into its place
     assert labels(nav.load(conn)["main"]) == ["First-Year Students"]
+
+
+def test_remove_takes_sub_entries_with_it(conn):
+    nav.add_pages(conn, "main", None, [pid(conn, "/admissions"), pid(conn, "/campus-life")], subpage_depth=2)
+    adm = item_id(conn, "main", "Admissions")
+    assert nav.count_below(conn, adm) == 3
+    assert nav.remove(conn, adm) == 4                   # the entry and everything under it
+    assert labels(nav.load(conn)["main"]) == ["Campus <Life>"]
+    assert conn.execute("SELECT count(*) FROM nav_items").fetchone()[0] == 1
+    # A footer column goes with its links too (keeping them needs them moved first).
+    col = nav.add_heading(conn, "footer", None, "Help")
+    nav.add_pages(conn, "footer", col, [pid(conn, "/about/contact")])
+    with pytest.raises(rules.RuleError, match="footer column"):
+        nav.remove(conn, col, keep_children=True)
+    assert nav.remove(conn, col) == 2 and nav.load(conn)["footer"] == []
 
 
 def test_entries_flag_pages_that_wont_exist(conn):

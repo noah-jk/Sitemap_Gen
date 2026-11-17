@@ -580,9 +580,14 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                           lambda conn: describe_entry_edit(conn, item_id, body))
 
     @app.delete("/api/p/{slug}/nav/{item_id}")
-    def nav_remove(request: Request, slug: str, item_id: int):
-        return tree_write(request, slug, lambda conn: nav.remove(conn, item_id) or {"ok": True},
-                          lambda conn: 'Removed "{}" from the {}'.format(*history.entry_label(conn, item_id)))
+    def nav_remove(request: Request, slug: str, item_id: int, keep_children: bool = False):
+        def describe(conn) -> str:
+            name, menu = history.entry_label(conn, item_id)
+            below = 0 if keep_children else nav.count_below(conn, item_id)
+            under = f" and {below} entr{'y' if below == 1 else 'ies'} under it" if below else ""
+            kept = " (its sub-entries stay)" if keep_children and nav.count_below(conn, item_id) else ""
+            return f'Removed "{name}"{under} from the {menu}{kept}'
+        return tree_write(request, slug, lambda conn: {"removed": nav.remove(conn, item_id, keep_children)}, describe)
 
     def describe_entry_edit(conn, item_id: int, body) -> str:
         name, menu = history.entry_label(conn, item_id)

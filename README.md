@@ -209,7 +209,9 @@ opens it. Entries can
 carry a shorter label than their page (double-click to rename; clear it to go
 back to the page's name), headings group links (footer columns, dropdown
 groups), and top-level main menu entries can be buttons (click their
-link/button chip). Pages that
+link/button chip). **Remove** takes an entry and everything under it out of the
+menu (the pages themselves stay); **Remove, keep its sub-entries** moves what was
+under it up into its place. Pages that
 aren't in any menu still exist, like landing pages. The grid's "In the current
 navigation but not in a new menu" view checks that nothing was dropped by
 accident.
