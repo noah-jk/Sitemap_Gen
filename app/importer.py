@@ -38,6 +38,9 @@ IGNORED = {"Address", "URL Encoded Address", "Content Type", "Status Code", "Sta
            *GA_COLUMNS, *CRAWL_COLUMNS}
 IGNORED_PREFIXES = ("H2-", "Closest Semantically", "Semantic ", "No. Semantically")
 
+# Optional Screaming Frog columns the app uses; when a crawl leaves them empty, the import says so.
+WATCHED_COLUMNS = ("Word Count", "No. Near Duplicates")
+
 NAV_THRESHOLD = 25.0  # % of Total: pages linked from (nearly) every page
 COLLECTION_SECTIONS = ("news", "calendar", "events", "blog", "stories")
 FILE_EXT = re.compile(r"\.(pdf|docx?|xlsx?|pptx?|zip|jpe?g|png|gif|svg|webp|mp[34]|csv|txt|ics)$", re.I)
@@ -70,6 +73,7 @@ class Summary:
     site_issues: Dict[str, int] = field(default_factory=lambda: collections.defaultdict(int))
     canonical_host: str = ""
     title_suffix: str = ""
+    empty_columns: List[str] = field(default_factory=list)
 
 
 class CrawlFormatError(ValueError):
@@ -168,6 +172,10 @@ def import_crawl(conn: sqlite3.Connection, lines: Iterable[str], filename: str,
         html_rows.append(row)
         if row.get("Crawl Timestamp"):
             crawl_times.append(row["Crawl Timestamp"])
+
+    ok_rows = [r for r in html_rows if r["Status Code"] == "200"]
+    s.empty_columns = [c for c in WATCHED_COLUMNS
+                       if ok_rows and not any((r.get(c) or "").strip() for r in ok_rows)]
 
     settings = conn.execute("SELECT canonical_host, title_suffix FROM settings").fetchone()
     ok_hosts = collections.Counter(urlsplit(r["Address"]).netloc.lower()
@@ -323,4 +331,5 @@ def summary_dict(s: Summary) -> dict:
     return {"rows_read": s.rows_read, "pages_new": s.pages_new, "pages_updated": s.pages_updated,
             "pages_missing": s.pages_missing, "error_pages": s.error_pages, "redirects": s.redirects,
             "skipped": dict(s.skipped), "site_issues": dict(s.site_issues),
-            "canonical_host": s.canonical_host, "title_suffix": s.title_suffix}
+            "canonical_host": s.canonical_host, "title_suffix": s.title_suffix,
+            "empty_columns": s.empty_columns}

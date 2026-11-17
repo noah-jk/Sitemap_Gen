@@ -7,7 +7,7 @@ from app.rules import PROBLEMS_SQL
 
 FIELDS: Dict[str, str] = {
     "id": "p.id", "label": "p.label", "url_path": "p.url_path", "current_url": "p.current_url", "status_code": "p.status_code",
-    "sessions": "p.sessions", "views": "p.views", "inlinks": "p.inlinks", "in_current_nav": "p.in_current_nav",
+    "sessions": "p.sessions", "views": "p.views", "inlinks": "p.inlinks", "word_count": "p.word_count", "in_current_nav": "p.in_current_nav",
     "collection": "p.collection", "recommendation": "p.recommendation", "decision": "p.decision",
     "status": "p.status", "notes": "p.notes", "missing_from_crawl": "p.missing_from_crawl",
     "redirect_to": "p.redirect_to", "redirect_label": "t.label", "redirect_path": "t.url_path",
@@ -18,6 +18,9 @@ FIELDS: Dict[str, str] = {
 }
 TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem", "menus"}
 EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl", "page_type"}
+
+# Same cut-off as Screaming Frog's own "Low Content Pages" filter. Short pages are candidates to combine.
+SHORT_WORDS = 200
 
 EFFECTIVE = "COALESCE(p.decision, p.recommendation)"
 KEPT = (f"COALESCE({EFFECTIVE}, '') NOT IN ('delete','combine','split') "
@@ -34,6 +37,8 @@ PRESETS: Dict[str, Tuple[str, str]] = {
     "nav_dropped": ("In the current navigation but not in a new menu",
                     f"p.in_current_nav = 1 AND NOT EXISTS (SELECT 1 FROM nav_items n WHERE n.page_id = p.id) AND {KEPT}"),
     "not_in_menu": ("Kept but not in any menu", f"NOT EXISTS (SELECT 1 FROM nav_items n WHERE n.page_id = p.id) AND {KEPT} AND p.collection = ''"),
+    "short": (f"Short pages (under {SHORT_WORDS} words)",
+              f"p.word_count < {SHORT_WORDS} AND p.status_code = 200 AND {KEPT} AND p.collection = ''"),
     "missing": ("Missing from the latest crawl", "p.missing_from_crawl = 1"),
 }
 

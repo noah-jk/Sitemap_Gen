@@ -216,3 +216,7 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .live-link { text-decoration: none; }
 .live-link:hover { text-decoration: underline; }
 .live-link::after { content: " ↗"; font-size: .8em; color: var(--muted); }
+
+/* Import: a note about something the crawl is missing */
+.notice { border-left: 4px solid var(--accent); background: var(--paper); padding: .5rem 1rem; margin: 1rem 0; border-radius: 4px; }
+.notice p, .notice ul { margin: .4rem 0; }

@@ -31,6 +31,18 @@
   </dl>
   <p class="muted small">Site host: <code>{{ settings.canonical_host or "not detected" }}</code>
     · Title suffix removed from labels: <code>{{ settings.title_suffix or "none" }}</code></p>
+  {% if summary.empty_columns %}
+  <div class="notice">
+    <p><strong>Screaming Frog left {{ summary.empty_columns|join(" and ") }} empty in this crawl.</strong></p>
+    <ul class="small">
+      {% if "Word Count" in summary.empty_columns %}<li>Word Count feeds the Words column and the
+        "Short pages" view. Turn it on under Configuration → Spider → Extraction → Word Count.</li>{% endif %}
+      {% if "No. Near Duplicates" in summary.empty_columns %}<li>Near duplicates need Configuration → Content →
+        Duplicates → Enable Near Duplicates, then Crawl Analysis before exporting.</li>{% endif %}
+    </ul>
+    <p class="small">Then re-crawl and import again: decisions, notes, and the sitemap are kept.</p>
+  </div>
+  {% endif %}
   {% if summary.skipped %}
   <h3>Skipped rows</h3>
   <ul>{% for reason, n in summary.skipped.items() %}<li>{{ n }} × {{ reason }}</li>{% endfor %}</ul>
