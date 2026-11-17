@@ -180,8 +180,11 @@ and the columns shown (**Columns** menu) can be saved as named views. The Label
 column stays in place while the grid scrolls sideways.
 
 Click a page's label to open its **detail panel**: where it sits in the new
-sitemap, its decision and redirect, notes (editable), menus, the pages it
-absorbs, every crawl column, GA4 traffic, and other URLs that point at it.
+sitemap, its decision and redirect, notes, menus, the pages it absorbs, every
+crawl column, GA4 traffic, and other URLs that point at it. Recommendation,
+Final Decision, status, and page type are dropdowns right in the panel, the
+redirect and content targets open the picker when clicked, and notes save when
+you click away.
 ↑ and ↓ (or J and K) step through the grid's rows, and Esc closes it.
 
 The sitemap and the menus are two related but separate structures.

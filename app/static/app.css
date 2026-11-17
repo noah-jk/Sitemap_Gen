@@ -337,3 +337,8 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 /* Navigation list: collapsed entries hide their sub-list; leaves keep the toggle's space so labels line up */
 .nav-list[hidden] { display: none; }
 .tree-toggle-leaf { display: inline-block; flex: none; cursor: default; }
+/* Detail panel: values edited in place */
+.facts dd > select { padding: 3px 6px; max-width: 100%; }
+button.value-btn { padding: 3px 8px !important; text-align: left; max-width: 100%; overflow-wrap: anywhere;
+  border-style: dashed !important; font-size: 13px; }
+.warn-text > button.value-btn { color: var(--warn); border-color: var(--warn) !important; }
