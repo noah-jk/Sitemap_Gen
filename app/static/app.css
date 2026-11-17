@@ -334,3 +334,6 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .map-topdrop.map-topdrop-empty { border-color: var(--line); padding: 16px; }
 .menu-map .map-row { border-top: 0; padding-top: 4px; }
 .menu-map .map-topdrop { margin-top: 6px; }
+/* Navigation list: collapsed entries hide their sub-list; leaves keep the toggle's space so labels line up */
+.nav-list[hidden] { display: none; }
+.tree-toggle-leaf { display: inline-block; flex: none; cursor: default; }

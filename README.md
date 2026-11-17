@@ -198,7 +198,10 @@ empty and you add what belongs in them, from the tab itself, from a page's
 each menu out in columns, the way a mega menu shows it (utility nav, main menu,
 footer), with a count of the entries under each; drag cards and columns within
 and between menus, or use an entry's **Move to…** to send it anywhere without
-dragging. Entries can
+dragging. In the list view, ▸/▾ collapses an entry's sub-entries (remembered
+per browser, with Collapse all and Expand all); a collapsed entry still drags
+with everything under it, and holding a dragged entry over it for a moment
+opens it. Entries can
 carry a shorter label than their page, headings group links (footer columns,
 dropdown groups), and top-level main menu entries can be buttons. Pages that
 aren't in any menu still exist, like landing pages. The grid's "In the current

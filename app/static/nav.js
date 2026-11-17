@@ -50,10 +50,14 @@
     out.push(["Add pages…", `Add pages under ${item.display}`, () => openAdd(menu, item.id, item.display)]);
     if (!item.heading) {
       out.push(["Pull in sub-pages", `Add ${item.display}'s sub-pages from the sitemap that aren't under it yet (including ones removed earlier)`,
-        () => act(send("POST", `/nav/${item.id}/subpages`, {depth: 1}), "").then((r) => {
-          if (r.ok) status.textContent = r.data.added ? `Added ${r.data.added} sub-page${r.data.added === 1 ? "" : "s"}.`
-            : "No sub-pages to add: they're all there already.";
-        })]);
+        () => {
+          closed.delete(item.id);  // show what gets pulled in
+          rememberClosed();
+          act(send("POST", `/nav/${item.id}/subpages`, {depth: 1}), "").then((r) => {
+            if (r.ok) status.textContent = r.data.added ? `Added ${r.data.added} sub-page${r.data.added === 1 ? "" : "s"}.`
+              : "No sub-pages to add: they're all there already.";
+          });
+        }]);
     }
     if (menu === "main") out.push(["Add heading", `Add a heading under ${item.display}`, () => addHeading(menu, item.id)]);
     out.push(["Rename", `Rename ${item.display}`, () => rename(item)]);
@@ -83,12 +87,46 @@
 
   // ---- list view ---------------------------------------------------------------
 
+  // Collapsed entries are remembered per browser. Everything starts open; menus are small.
+  const CLOSED_KEY = `nav-closed-${document.body.dataset.slug}`;
+  let closed = new Set();
+  try { closed = new Set(JSON.parse(localStorage.getItem(CLOSED_KEY) || "[]")); } catch (e) { /* private mode */ }
+  const rememberClosed = () => {
+    try { localStorage.setItem(CLOSED_KEY, JSON.stringify([...closed])); } catch (e) { /* ignore */ }
+  };
+
+  // Open or close an entry in place (no redraw, so a drag in progress isn't disturbed).
+  function setOpen(li, isOpen) {
+    const id = Number(li.dataset.id);
+    if (isOpen) closed.delete(id); else closed.add(id);
+    rememberClosed();
+    li.classList.toggle("collapsed", !isOpen);
+    const sub = li.querySelector(":scope > .nav-list");
+    if (sub) sub.hidden = !isOpen;
+    const toggle = li.querySelector(":scope > .tree-row > .tree-toggle");
+    if (toggle) {
+      toggle.textContent = isOpen ? "▾" : "▸";
+      toggle.setAttribute("aria-expanded", String(isOpen));
+      toggle.setAttribute("aria-label", `${isOpen ? "Collapse" : "Expand"} ${toggle.dataset.name}`);
+    }
+  }
+
   function row(item, siblings, index, menu, parentId, level) {
     const li = el("li", {"data-id": item.id});
     const label = el("span", {class: "tree-label"}, el("span", {text: item.display}), ...itemTags(item));
     const info = [];
     if (item.label && item.page_label) info.push(`page: ${item.page_label}`);
     if (item.url_path) info.push(item.url_path);
+    const n = below(item);
+    if (n) info.push(`${entriesText(n)} below`);
+    const hasKids = item.children.length > 0;
+    const isOpen = !closed.has(item.id);
+    // The toggle sits after the drag handle and isn't part of it, so clicking it never starts a drag.
+    const toggle = hasKids
+      ? el("button", {type: "button", class: "tree-toggle", "data-name": item.display, "aria-expanded": String(isOpen),
+          "aria-label": `${isOpen ? "Collapse" : "Expand"} ${item.display}`, text: isOpen ? "▾" : "▸"})
+      : el("span", {class: "tree-toggle tree-toggle-leaf", "aria-hidden": "true"});
+    if (hasKids) toggle.addEventListener("click", () => setOpen(li, li.classList.contains("collapsed")));
 
     const actions = el("span", {class: "tree-actions"});
     actionsFor(item, siblings, index, menu, parentId, {up: "↑", down: "↓"}).forEach(([text, title, fn]) => {
@@ -97,13 +135,16 @@
       actions.append(b);
     });
 
-    const parts = [el("span", {class: "tree-handle", title: "Drag to move", "aria-hidden": "true", text: "⠿"})];
+    const parts = [el("span", {class: "tree-handle", title: "Drag to move", "aria-hidden": "true", text: "⠿"}), toggle];
     if (item.problem) {
       parts.push(el("span", {class: "problem-flag", title: item.problem, "aria-label": `Problem: ${item.problem}`, text: "!"}));
     }
     parts.push(label, el("span", {class: "muted small", text: info.join(" · ")}), actions);
     li.append(el("div", {class: "tree-row"}, ...parts));
-    li.append(list(item.children, menu, item.id, level + 1));
+    // A collapsed entry's sub-list stays in the page (hidden), so dragging the entry still carries it.
+    const sub = list(item.children, menu, item.id, level + 1);
+    li.append(sub);
+    if (hasKids && !isOpen) { li.classList.add("collapsed"); sub.hidden = true; }
     return li;
   }
 
@@ -113,7 +154,10 @@
     sortables.push(Sortable.create(ul, {
       group: "nav", handle: ".tree-handle", animation: 120, fallbackOnBody: true, swapThreshold: 0.6,
       emptyInsertThreshold: 8, draggable: "li[data-id]",
+      onStart: () => { navDragging = true; },
       onEnd: (evt) => {
+        navDragging = false;
+        clearTimeout(hoverTimer);
         if (evt.from === evt.to && evt.oldDraggableIndex === evt.newDraggableIndex) return;
         const parent = evt.to.dataset.parent;
         act(send("POST", "/nav/move", {id: Number(evt.item.dataset.id), menu: evt.to.dataset.menu,
@@ -122,6 +166,27 @@
     }));
     return ul;
   }
+
+  // While dragging, holding over a collapsed entry for a moment opens it, so things can be dropped inside.
+  let navDragging = false;
+  let hoverTimer = null;
+  let hoverLi = null;
+  document.addEventListener("dragover", (e) => {
+    if (!navDragging) return;
+    const li = e.target.closest && e.target.closest("#nav-lists li.collapsed");
+    if (li === hoverLi) return;
+    hoverLi = li;
+    clearTimeout(hoverTimer);
+    if (li) hoverTimer = setTimeout(() => { if (hoverLi === li) setOpen(li, true); }, 600);
+  });
+
+  function setAll(isOpen) {
+    document.querySelectorAll("#nav-lists li[data-id]").forEach((li) => {
+      if (li.querySelector(":scope > .tree-row > button.tree-toggle")) setOpen(li, isOpen);
+    });
+  }
+  $("collapse-all").addEventListener("click", () => setAll(false));
+  $("expand-all").addEventListener("click", () => setAll(true));
 
   const VIEW_KEY = `nav-view-${document.body.dataset.slug}`;
   let view = new URLSearchParams(window.location.search).get("view");
@@ -145,6 +210,8 @@
     sortables = [];
     $("nav-lists").hidden = view !== "list";
     $("nav-map").hidden = view !== "map";
+    $("collapse-all").hidden = view !== "list";
+    $("expand-all").hidden = view !== "list";
     document.querySelector("main").classList.toggle("full", view === "map");
     document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
     if (view === "map") renderMap(); else renderLists();
@@ -256,6 +323,7 @@
   $("me-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const [menu, parent] = $("me-dest").value.split(":");
+    if (parent) { closed.delete(Number(parent)); rememberClosed(); }
     const r = await send("POST", "/nav/move", {id: movingEntry.id, menu, parent_id: parent ? Number(parent) : null, index: 100000});
     if (!r.ok) { $("me-error").textContent = r.data.detail || "That didn't work."; return; }
     $("move-entry-dialog").close();
@@ -331,6 +399,7 @@
   $("add-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!adding.chosen.size) { $("add-error").textContent = "Click pages in the results to choose them."; return; }
+    if (adding.parentId !== null) { closed.delete(adding.parentId); rememberClosed(); }  // show what was added
     const r = await send("POST", "/nav/pages", {menu: adding.menu, parent_id: adding.parentId,
       page_ids: [...adding.chosen.keys()], subpage_depth: Number($("add-depth").value)});
     if (!r.ok) { $("add-error").textContent = r.data.detail || "That didn't work."; return; }
