@@ -311,3 +311,29 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 @media (min-width: 1100px) {
   body.drawer-open .grid-page { margin-right: min(460px, 100vw); }
 }
+
+/* Navigation tab: map view, one board per menu */
+.menus[hidden] { display: none; }
+.nav-map { display: flex; flex-direction: column; gap: 18px; margin-top: 8px; }
+.menu-map { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 0 4px; }
+.menu-map-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; padding: 0 16px; }
+.menu-map-head h2 { margin: 0; }
+.menu-map-head .toolbar { margin-left: auto; padding: 0; }
+.menu-map .map-board { padding-top: 6px; }
+.menu-map .map-row { padding-top: 10px; min-height: 60px; }
+.menu-map .map-col::before { display: none; }
+.menu-map .map-l1 { background: var(--paper); }
+.map-head .problem-flag { flex: none; }
+/* The strip above a map: drop a card or column there to make it top-level. Fills an empty board. */
+.map-topdrop { margin: 10px 16px 0; padding: 6px 10px; min-height: 34px; border: 2px dashed transparent; border-radius: 8px;
+  text-align: center; overflow: hidden; }
+.map-topdrop > .map-card, .map-topdrop > .map-col { display: none; }
+.map-dragging .map-topdrop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.map-topdrop:not(.map-topdrop-empty) > span { opacity: .55; }
+.map-dragging .map-topdrop > span { opacity: 1; color: var(--ink); }
+.map-topdrop.map-topdrop-empty { border-color: var(--line); padding: 16px; }
+.menu-map .map-row { border-top: 0; padding-top: 4px; }
+.menu-map .map-topdrop { margin-top: 6px; }
+/* Navigation list: collapsed entries hide their sub-list; leaves keep the toggle's space so labels line up */
+.nav-list[hidden] { display: none; }
+.tree-toggle-leaf { display: inline-block; flex: none; cursor: default; }
