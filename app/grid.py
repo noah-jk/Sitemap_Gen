@@ -1,5 +1,6 @@
 """SQL for the Pages grid: columns, filters, built-in views. Every name that reaches SQL comes
 from the dictionaries here, never from the request."""
+import json
 import re
 from typing import Dict, List, Optional, Tuple
 
@@ -16,6 +17,9 @@ FIELDS: Dict[str, str] = {
     "content_targets": "(SELECT json_group_array(target_id) FROM page_content_targets WHERE page_id = p.id)",
     "problem": "pr.msg", "updated_at": "p.updated_at",
 }
+# Grid columns that can be hidden (Label, the checkbox, and the problem marker always show).
+HIDEABLE = {"url_path", "status_code", "sessions", "inlinks", "word_count", "in_current_nav", "collection",
+            "parent_label", "menus", "page_type", "recommendation", "decision", "redirect_label", "status", "notes"}
 TEXT_FILTERS = {"label", "url_path", "notes", "collection", "redirect_label", "parent_label", "problem", "menus"}
 EXACT_FILTERS = {"recommendation", "decision", "status", "status_code", "in_current_nav", "missing_from_crawl", "page_type"}
 
@@ -108,3 +112,54 @@ def search_targets(conn, query: str, exclude: Optional[int], limit: int = 20):
         f"AND (status_code IS NULL OR status_code < 400) "
         f"ORDER BY (url_path = ?) DESC, sessions DESC, label LIMIT ?",
         (like, like, exclude, query.strip(), limit)).fetchall()
+
+
+# ---- one page in full (the detail panel) -------------------------------------
+
+HIDDEN_DETAIL = {"crawl_extra", "variants", "hash", "attention", "hidden", "sort_order", "provenance", "import_id",
+                 "is_button"}
+MENU_NAMES = {"main": "Main menu", "utility": "Utility nav", "footer": "Footer"}
+
+
+def page_detail(conn, page_id: int) -> Optional[dict]:
+    """Everything known about one page: the grid row, all crawl columns, where it sits in the new
+    sitemap and menus, and which pages and old URLs point at it."""
+    from app import tree
+    full = conn.execute("SELECT * FROM pages WHERE id = ?", (page_id,)).fetchone()
+    if full is None:
+        return None
+    out = {k: full[k] for k in full.keys() if k not in HIDDEN_DETAIL}
+    out["crawl_extra"] = json.loads(full["crawl_extra"] or "{}")
+    variants = json.loads(full["variants"] or "[]")
+    out["variants"] = [v for v in variants if v != full["current_url"]]
+
+    row = one_row(conn, page_id)
+    for k in ("problem", "redirect_label", "redirect_path", "parent_label", "menus"):
+        out[k] = row[k]
+    out["content_targets"] = [dict(r) for r in conn.execute(
+        "SELECT p.id, p.label, p.url_path FROM page_content_targets c JOIN pages p ON p.id = c.target_id "
+        "WHERE c.page_id = ? ORDER BY p.label", (page_id,))]
+    out["incoming"] = [dict(r) for r in conn.execute(
+        f"SELECT p.id, p.label, p.url_path, {EFFECTIVE} AS disposition FROM pages p WHERE p.id IN ("
+        f" SELECT id FROM pages WHERE redirect_to = ? UNION SELECT page_id FROM page_content_targets WHERE target_id = ?)"
+        f" ORDER BY p.label", (page_id, page_id))]
+    out["menu_entries"] = [{"menu": MENU_NAMES.get(r["menu"], r["menu"]), "label": r["label"]} for r in conn.execute(
+        "SELECT menu, label FROM nav_items WHERE page_id = ? ORDER BY menu, id", (page_id,))]
+    out["old_redirects"] = [dict(r) for r in conn.execute(
+        "SELECT source_url, status_code FROM existing_redirects WHERE target_url IN (SELECT value FROM json_each(?)) "
+        "ORDER BY source_url LIMIT 50", (json.dumps(variants),))]
+
+    # Where it sits in the new sitemap (pages being removed, gone, or in a collection aren't in it).
+    out["sitemap"], out["trail"] = None, []
+    parents = {}
+    for node, parent, _ in tree.walk(tree.load(conn)):
+        parents[node.id] = parent
+        if node.id == page_id:
+            out["sitemap"] = {"type": node.type, "children": len(node.children), "descendants": node.descendants,
+                              "absorbs": node.absorbs}
+            up = parent
+            while up is not None:
+                out["trail"].insert(0, {"id": up.id, "label": up.label})
+                up = parents.get(up.id)
+            break
+    return out

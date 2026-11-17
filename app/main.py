@@ -414,6 +414,16 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         warm(slug)
         return {"count": count, "warning": warning}
 
+    @app.get("/api/p/{slug}/pages/{page_id}/detail")
+    def page_detail(request: Request, slug: str, page_id: int):
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            detail = grid.page_detail(conn, page_id)
+            if detail is None:
+                raise HTTPException(404, "That page no longer exists.")
+            detail["row"] = row_dict(grid.one_row(conn, page_id))
+        return detail
+
     @app.get("/api/p/{slug}/pages/{page_id}/content-targets")
     def content_targets(request: Request, slug: str, page_id: int):
         require_user(request)
@@ -716,4 +726,7 @@ def clean_view(definition: dict) -> dict:
     sorts = [{"column": s["column"], "dir": "desc" if s.get("dir") == "desc" else "asc"}
              for s in definition.get("sorts", []) if isinstance(s, dict) and s.get("column") in grid.FIELDS][:5]
     view = definition.get("view") if definition.get("view") in grid.PRESETS else ""
-    return {"view": view, "filters": filters, "sorts": sorts}
+    out = {"view": view, "filters": filters, "sorts": sorts}
+    if isinstance(definition.get("hidden"), list):  # columns hidden in this view (older views don't say)
+        out["hidden"] = sorted({c for c in definition["hidden"] if c in grid.HIDEABLE})
+    return out

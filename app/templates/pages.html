@@ -12,6 +12,14 @@
   <label class="inline">View
     <select id="view-select"><option value="">All pages</option></select>
   </label>
+  <details class="popover-wrap" id="col-menu">
+    <summary class="btn-like">Columns</summary>
+    <div class="popover">
+      <p class="muted small">Label always shows. Hidden columns are saved with a view.</p>
+      <div id="col-list" class="col-list"></div>
+      <button type="button" id="col-all" class="link">Show all</button>
+    </div>
+  </details>
   <button type="button" id="save-view">Save view</button>
   <button type="button" id="delete-view" hidden>Delete view</button>
   <button type="button" id="problem-badge" class="badge" hidden></button>
@@ -35,6 +43,22 @@
   <button type="button" class="primary" id="bulk-apply">Apply</button>
 </div>
 <div id="grid"></div>
+
+<aside id="detail" class="drawer" hidden aria-labelledby="dt-title">
+  <div class="drawer-head">
+    <div class="drawer-title">
+      <p id="dt-trail" class="muted small"></p>
+      <h2 id="dt-title"></h2>
+      <p id="dt-url" class="small"></p>
+    </div>
+    <div class="drawer-nav">
+      <button type="button" id="dt-prev" title="Previous page in the grid (↑ or K)" aria-label="Previous page">↑</button>
+      <button type="button" id="dt-next" title="Next page in the grid (↓ or J)" aria-label="Next page">↓</button>
+      <button type="button" id="dt-close" title="Close (Esc)" aria-label="Close">✕</button>
+    </div>
+  </div>
+  <div id="dt-body" class="drawer-body"></div>
+</aside>
 
 <dialog id="target-dialog" aria-labelledby="td-title">
   <form id="td-form">

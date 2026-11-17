@@ -78,6 +78,7 @@
     if (value.startsWith("saved:")) {
       const view = savedViews.find((v) => `saved:${v.id}` === value);
       currentPreset = view.definition.view || "";
+      if (Array.isArray(view.definition.hidden)) setHidden(view.definition.hidden);
       view.definition.filters.forEach((f) => table.setHeaderFilterValue(f.field, f.value));
       table.setSort(view.definition.sorts);
     } else {
@@ -94,12 +95,13 @@
   viewSelect.addEventListener("change", () => applyView(viewSelect.value));
 
   $("save-view").addEventListener("click", async () => {
-    const name = window.prompt("Name this view (filters, sort, and built-in view are saved):");
+    const name = window.prompt("Name this view (filters, sort, columns, and built-in view are saved):");
     if (!name || !name.trim()) return;
     const definition = {
       view: currentPreset,
       filters: table.getHeaderFilters().map((f) => ({field: f.field, value: f.value})),
       sorts: table.getSorters().map((s) => ({column: s.field, dir: s.dir})),
+      hidden: hiddenFields(),
     };
     const r = await send("POST", "/views", {name, definition});
     if (!r.ok) { status.textContent = r.data.detail || "Couldn't save the view."; return; }
@@ -141,6 +143,14 @@
       el("span", {class: "muted", text: ` ${row.redirect_path || "(new page)"}${extra}`}));
   }
 
+  // Clicking a label opens the detail panel instead of selecting the row (the checkbox selects).
+  // The listener sits on the label itself so the click never reaches the row's selection handler.
+  function labelFormatter(cell) {
+    const span = el("span", {class: "label-open", title: "Open the details", text: cell.getValue() || ""});
+    span.addEventListener("click", (e) => { e.stopPropagation(); openDetail(cell.getRow()); });
+    return span;
+  }
+
   const disposition = (title, field) => ({
     title, field, width: 130, editor: "list", editorParams: {values: choices},
     headerFilter: "list", headerFilterParams: {values: filterChoices}, headerFilterFunc: "=",
@@ -168,8 +178,10 @@
     columns: [
       {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false,
        width: 40, frozen: true},
-      {title: "", field: "problem", formatter: problemFormatter, width: 34, hozAlign: "center", headerSort: false},
-      {title: "Label", field: "label", formatter: "plaintext", headerFilter: "input", minWidth: 200},
+      {title: "", field: "problem", formatter: problemFormatter, width: 34, hozAlign: "center", headerSort: false,
+       frozen: true},
+      {title: "Label", field: "label", formatter: labelFormatter, headerFilter: "input", minWidth: 200, width: 240,
+       frozen: true},
       {title: "Path", field: "url_path", formatter: pathFormatter, headerFilter: "input", minWidth: 200},
       {title: "HTTP", field: "status_code", width: 72, hozAlign: "right"},
       {title: "Sessions", field: "sessions", width: 96, hozAlign: "right", formatter: "money",
@@ -201,6 +213,7 @@
   });
 
   function report(result, row) {
+    if (detailId === row.getData().id) loadDetail(detailId);
     if (result.ok) {
       row.update(result.data.row);
       row.reformat();
@@ -438,7 +451,232 @@
     run({[field]: value || null});
   });
 
+  // ---- columns ---------------------------------------------------------------
+
+  const HIDE_KEY = `grid-hidden-${body.dataset.slug}`;
+  const choosable = () => table.getColumns().filter((c) => {
+    const d = c.getDefinition();
+    return d.field && d.title && !d.frozen;
+  });
+  const hiddenFields = () => choosable().filter((c) => !c.isVisible()).map((c) => c.getField());
+
+  function setHidden(fields, remember = true) {
+    choosable().forEach((c) => {
+      const hide = fields.includes(c.getField());
+      if (hide && c.isVisible()) {
+        if (c.getDefinition().headerFilter) table.setHeaderFilterValue(c.getField(), "");  // no invisible filters
+        c.hide();
+      } else if (!hide && !c.isVisible()) {
+        c.show();
+      }
+    });
+    if (remember) {
+      try { localStorage.setItem(HIDE_KEY, JSON.stringify(hiddenFields())); } catch (e) { /* not remembered */ }
+    }
+    drawColumnList();
+  }
+
+  function drawColumnList() {
+    $("col-list").replaceChildren(...choosable().map((c) => {
+      const box = el("input", {type: "checkbox"});
+      box.checked = c.isVisible();
+      box.addEventListener("change", () => {
+        const hidden = hiddenFields().filter((f) => f !== c.getField());
+        if (!box.checked) hidden.push(c.getField());
+        setHidden(hidden);
+      });
+      return el("label", {class: "check"}, box, ` ${c.getDefinition().title}`);
+    }));
+  }
+  $("col-all").addEventListener("click", () => setHidden([]));
+  const colMenu = $("col-menu");
+  document.addEventListener("click", (e) => { if (colMenu.open && !colMenu.contains(e.target)) colMenu.open = false; });
+
+  table.on("tableBuilt", () => {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(HIDE_KEY) || "[]"); } catch (e) { saved = []; }
+    setHidden(Array.isArray(saved) ? saved : [], false);
+  });
+
+  // ---- detail panel ----------------------------------------------------------
+
+  const drawer = $("detail");
+  let detailId = null;
+  let detailRow = null;
+
+  const fmt = (v) => (v === null || v === undefined || v === "") ? "—" : typeof v === "number" ? v.toLocaleString() : String(v);
+  const pageText = (n) => `${n.toLocaleString()} page${n === 1 ? "" : "s"}`;
+
+  function section(title, ...children) {
+    return el("section", {class: "dt-section"}, el("h3", {text: title}), ...children);
+  }
+
+  function facts(pairs) {
+    const dl = el("dl", {class: "facts"});
+    pairs.filter(Boolean).forEach(([k, v, cls]) => {
+      dl.append(el("dt", {text: k}), v instanceof Node ? el("dd", {class: cls || ""}, v) : el("dd", {class: cls || "", text: fmt(v)}));
+    });
+    return dl;
+  }
+
+  function pageLink(p) {
+    const b = el("button", {type: "button", class: "link", text: p.label});
+    b.addEventListener("click", () => openDetail(table.getRow(p.id) || null, p.id));
+    return el("li", {}, b, el("span", {class: "muted small", text: ` ${p.url_path || "(new page)"}${p.disposition ? " · " + p.disposition : ""}`}));
+  }
+
+  function render(d) {
+    $("dt-title").textContent = d.label;
+    $("dt-trail").textContent = d.sitemap ? ["Home"].concat(d.trail.map((t) => t.label)).join(" › ")
+      : "Not in the new sitemap (removed, gone, or a news/calendar item)";
+    const url = $("dt-url");
+    url.replaceChildren();
+    if (/^https?:\/\//i.test(d.current_url || "")) {
+      url.append(el("a", {href: d.current_url, target: "_blank", rel: "noopener noreferrer", class: "live-link", text: d.url_path}));
+    } else {
+      url.append(el("span", {class: "muted", text: d.is_new ? "New page (not on the current site)" : (d.url_path || "")}));
+    }
+
+    const parts = [];
+    if (d.problem) parts.push(el("p", {class: "dt-problem", role: "alert"}, el("span", {class: "problem-flag", text: "!"}), ` ${d.problem}`));
+
+    // Decision
+    const typeName = d.page_type ? TYPE_CHOICES[d.page_type] : d.sitemap ? `${TYPE_CHOICES[d.sitemap.type]} (auto)` : "Auto";
+    const targets = el("div");
+    if (d.redirect_label || NEEDS_TARGET.includes(d.decision || d.recommendation || "")) {
+      targets.append(facts([["Redirect to", d.redirect_label ? `${d.redirect_label} ${d.redirect_path || "(new page)"}` : "Not chosen"]]));
+    }
+    if (d.content_targets.length) {
+      targets.append(el("p", {class: "small muted", text: "Content goes to"}), el("ul", {class: "dt-list"}, ...d.content_targets.map(pageLink)));
+    }
+    const change = el("button", {type: "button", text: "Change decision or redirect…"});
+    change.addEventListener("click", () => detailRow && openDialog({row: detailRow}));
+    change.disabled = !detailRow;
+    parts.push(section("Decision", facts([
+      ["Recommendation", d.recommendation], ["Final Decision", d.decision], ["Status", d.status], ["Page type", typeName],
+    ]), targets, change));
+
+    // Notes
+    const notes = el("textarea", {rows: "4", "aria-label": "Notes"});
+    notes.value = d.notes || "";
+    const save = el("button", {type: "button", class: "primary", text: "Save notes"});
+    const saved = el("span", {class: "muted small", role: "status"});
+    save.addEventListener("click", async () => {
+      const r = await send("PATCH", `/pages/${d.id}`, {changes: {notes: notes.value}, updated_at: d.updated_at});
+      if (r.ok) { saved.textContent = "Saved."; if (detailRow) { detailRow.update(r.data.row); detailRow.reformat(); } loadDetail(d.id); }
+      else saved.textContent = r.data.detail || `Not saved (${r.status}).`;
+    });
+    parts.push(section("Notes", notes, el("div", {class: "row"}, save, saved)));
+
+    // Structure
+    const s = d.sitemap;
+    parts.push(section("In the new site", facts([
+      ["Parent", d.parent_label || (s ? "Top level" : "—")],
+      s && ["Below it", s.descendants ? `${pageText(s.descendants)} (${s.children} directly)` : "None"],
+      ["Menus", d.menu_entries.length ? d.menu_entries.map((m) => m.label ? `${m.menu} (as "${m.label}")` : m.menu).join(", ") : "Not in a menu"],
+    ]), d.incoming.length ? el("div", {}, el("p", {class: "small muted", text: `Absorbs ${pageText(d.incoming.length)}`}),
+      el("ul", {class: "dt-list"}, ...d.incoming.map(pageLink))) : ""));
+
+    // Crawl
+    if (!d.is_new) {
+      const canonicalOff = d.canonical && d.current_url && d.canonical !== d.current_url;
+      parts.push(section("Crawl", facts([
+        ["Title", d.title], ["H1", d.h1], ["Meta description", d.meta_description],
+        ["Canonical", canonicalOff ? `${d.canonical} (differs from the address)` : d.canonical, canonicalOff ? "warn-text" : ""],
+        ["HTTP status", d.status_code], ["Indexability", d.indexability], ["Crawl depth", d.crawl_depth],
+        ["Inlinks", d.inlinks !== null ? `${fmt(d.inlinks)} (${fmt(d.unique_inlinks)} unique)` : null],
+        ["Linked from", d.pct_of_total !== null ? `${d.pct_of_total}% of pages${d.in_current_nav ? " (in the current navigation)" : ""}` : null],
+        ["Words", d.word_count], ["Near duplicates", d.near_duplicates ? `${d.near_duplicates}, closest ${d.closest_near_duplicate}` : d.near_duplicates],
+        ["Collection", d.collection], d.missing_from_crawl && ["Latest crawl", "Missing from the latest crawl", "warn-text"],
+      ])));
+      parts.push(section("Traffic (GA4)", facts([
+        ["Sessions", d.sessions], ["Views", d.views], ["Engaged sessions", d.engaged_sessions],
+        ["Engagement rate", d.engagement_rate !== null ? `${Math.round(d.engagement_rate * 100)}%` : null], ["Key events", d.key_events],
+      ])));
+      const urls = [];
+      if (d.variants.length) urls.push(el("p", {class: "small muted", text: "Also crawled as"}), el("ul", {class: "dt-list small"}, ...d.variants.map((v) => el("li", {text: v}))));
+      if (d.old_redirects.length) urls.push(el("p", {class: "small muted", text: "Old URLs already redirecting here"}),
+        el("ul", {class: "dt-list small"}, ...d.old_redirects.map((r) => el("li", {text: `${r.source_url} (${r.status_code})`}))));
+      if (urls.length) parts.push(section("Other addresses", ...urls));
+      const extra = Object.entries(d.crawl_extra);
+      if (extra.length) {
+        const more = el("details", {class: "dt-more"}, el("summary", {text: `All other crawl columns (${extra.length})`}), facts(extra));
+        parts.push(more);
+      }
+    }
+    $("dt-body").replaceChildren(...parts);
+    $("dt-prev").disabled = !neighbour(-1);
+    $("dt-next").disabled = !neighbour(1);
+  }
+
+  async function loadDetail(id) {
+    const resp = await fetch(api(`/pages/${id}/detail`));
+    if (detailId !== id) return;  // moved on meanwhile
+    if (!resp.ok) { $("dt-body").replaceChildren(el("p", {class: "error", text: "That page no longer exists."})); return; }
+    const d = await resp.json();
+    if (detailId === id) render(d);
+  }
+
+  function markCurrent() {
+    document.querySelectorAll(".tabulator-row.row-current").forEach((r) => r.classList.remove("row-current"));
+    if (detailRow && detailRow.getElement()) detailRow.getElement().classList.add("row-current");
+  }
+
+  function openDetail(row, id) {
+    detailRow = row || null;
+    detailId = row ? row.getData().id : id;
+    const top = document.querySelector(".topbar").getBoundingClientRect().bottom;
+    drawer.style.top = `${Math.max(0, top)}px`;
+    drawer.hidden = false;
+    document.body.classList.add("drawer-open");
+    markCurrent();
+    $("dt-body").replaceChildren(el("p", {class: "muted", text: "Loading…"}));
+    loadDetail(detailId);
+  }
+
+  function closeDetail() {
+    drawer.hidden = true;
+    document.body.classList.remove("drawer-open");
+    detailId = null;
+    detailRow = null;
+    markCurrent();
+  }
+
+  function neighbour(step) {
+    if (!detailRow) return null;
+    const rows = table.getRows("active");
+    const at = rows.indexOf(detailRow);
+    return at < 0 ? null : rows[at + step] || null;
+  }
+
+  function go(step) {
+    const next = neighbour(step);
+    if (next) { openDetail(next); table.scrollToRow(next, "nearest", false); }
+  }
+
+  $("dt-prev").addEventListener("click", () => go(-1));
+  $("dt-next").addEventListener("click", () => go(1));
+  $("dt-close").addEventListener("click", closeDetail);
+  document.addEventListener("keydown", (e) => {
+    if (drawer.hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest("input, textarea, select, [contenteditable], .tabulator-editing") || document.querySelector("dialog[open]")) return;
+    if (e.key === "Escape") closeDetail();
+    else if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); go(1); }
+    else if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); go(-1); }
+  });
+  table.on("dataProcessed", () => {  // new page of rows: keep the panel on the same page if it's still listed
+    if (detailId === null) return;
+    detailRow = table.getRow(detailId) || null;
+    markCurrent();
+    if (!drawer.hidden) { $("dt-prev").disabled = !neighbour(-1); $("dt-next").disabled = !neighbour(1); }
+  });
+  table.on("renderComplete", markCurrent);
+
   loadViews();
   // Undo or redo in the top bar: reload this tab's data in place instead of the whole page.
-  document.addEventListener("history:changed", (e) => { e.preventDefault(); table.replaceData(); });
+  document.addEventListener("history:changed", (e) => {
+    e.preventDefault();
+    table.replaceData();
+    if (detailId !== null) loadDetail(detailId);
+  });
 })();
