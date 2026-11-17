@@ -20,6 +20,17 @@
     <a href="/p/{{ slug }}/exports"{% if tab == "exports" %} aria-current="page"{% endif %}>Exports</a>
     <a href="/p/{{ slug }}/import"{% if tab == "import" %} aria-current="page"{% endif %}>Import</a>
   </nav>
+  <div class="history" id="history" data-slug="{{ slug }}" data-csrf="{{ csrf }}">
+    <button type="button" id="undo-btn" disabled>↶ Undo</button>
+    <button type="button" id="redo-btn" disabled>↷ Redo</button>
+    <details class="history-menu" id="history-menu">
+      <summary>History</summary>
+      <div class="history-panel">
+        <p class="muted small">Undo goes back one edit at a time, newest first. Imports aren't included.</p>
+        <ol id="history-list" class="history-list"></ol>
+      </div>
+    </details>
+  </div>
   {% endif %}
   {% if user %}
   <form class="logout" method="post" action="/logout">
@@ -31,5 +42,9 @@
 <main class="{% block main_class %}content{% endblock %}">
 {% block content %}{% endblock %}
 </main>
+{% if project %}
+<div id="history-toast" class="history-toast" role="status" aria-live="polite" hidden></div>
+<script src="/static/history.js" defer></script>
+{% endif %}
 </body>
 </html>

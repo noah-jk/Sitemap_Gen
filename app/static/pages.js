@@ -439,4 +439,6 @@
   });
 
   loadViews();
+  // Undo or redo in the top bar: reload this tab's data in place instead of the whole page.
+  document.addEventListener("history:changed", (e) => { e.preventDefault(); table.replaceData(); });
 })();

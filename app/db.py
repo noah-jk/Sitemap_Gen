@@ -155,6 +155,30 @@ PROJECT_MIGRATIONS: List[str] = [
     CREATE INDEX nav_items_tree ON nav_items(menu, parent_id, sort_order);
     CREATE INDEX nav_items_page ON nav_items(page_id);
     """,
+    """
+    CREATE TABLE actions(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token TEXT NOT NULL UNIQUE,
+      user TEXT NOT NULL,
+      label TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      undone INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE action_rows(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_id INTEGER NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+      tbl TEXT NOT NULL,
+      row_key TEXT NOT NULL,
+      before TEXT,
+      after TEXT
+    );
+    CREATE INDEX action_rows_action ON action_rows(action_id, id);
+    -- A new edit drops anything waiting to be redone, and only the latest 200 actions are kept.
+    CREATE TRIGGER actions_trim AFTER INSERT ON actions BEGIN
+      DELETE FROM actions WHERE undone = 1 AND id < NEW.id;
+      DELETE FROM actions WHERE id <= NEW.id - 200;
+    END;
+    """,
 ]
 
 
