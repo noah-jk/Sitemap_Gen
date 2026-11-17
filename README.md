@@ -180,15 +180,19 @@ and the columns shown (**Columns** menu) can be saved as named views. The Label
 column stays in place while the grid scrolls sideways.
 
 Click a page's label to open its **detail panel**: where it sits in the new
-sitemap, its decision and redirect, notes (editable), menus, the pages it
-absorbs, every crawl column, GA4 traffic, and other URLs that point at it.
+sitemap, its decision and redirect, notes, menus, the pages it absorbs, every
+crawl column, GA4 traffic, and other URLs that point at it. Recommendation,
+Final Decision, status, and page type are dropdowns right in the panel, the
+redirect and content targets open the picker when clicked, and notes save when
+you click away.
 ↑ and ↓ (or J and K) step through the grid's rows, and Esc closes it.
 
 The sitemap and the menus are two related but separate structures.
 
 The **Sitemap** tab is where every kept page lives: drag the ⠿ handle (or use
 **Move…**) to reorder and re-nest pages, add new pages that don't exist on the
-current site, and rename pages. Each page shows how many pages sit below it,
+current site, and rename pages (double-click a name to edit it in place; Enter
+saves, Esc cancels). Click a page's type tag to change its page type. Each page shows how many pages sit below it,
 how many it absorbs, and which menus it's in. In the grid, the bulk bar can
 also move every matching page under a section.
 
@@ -202,8 +206,12 @@ dragging. In the list view, ▸/▾ collapses an entry's sub-entries (remembered
 per browser, with Collapse all and Expand all); a collapsed entry still drags
 with everything under it, and holding a dragged entry over it for a moment
 opens it. Entries can
-carry a shorter label than their page, headings group links (footer columns,
-dropdown groups), and top-level main menu entries can be buttons. Pages that
+carry a shorter label than their page (double-click to rename; clear it to go
+back to the page's name), headings group links (footer columns, dropdown
+groups), and top-level main menu entries can be buttons (click their
+link/button chip). **Remove** takes an entry and everything under it out of the
+menu (the pages themselves stay); **Remove, keep its sub-entries** moves what was
+under it up into its place. Pages that
 aren't in any menu still exist, like landing pages. The grid's "In the current
 navigation but not in a new menu" view checks that nothing was dropped by
 accident.
@@ -217,8 +225,8 @@ wireframe in the prototype, built from blocks (hero, cards, filters, item
 rows, fields…), and the type is in the content audit.
 
 The **Prototype** tab builds the clickable prototype from the sitemap (pages
-and URLs) and the menus, with menu style and depth settings, and previews it
-in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has
+and URLs) and the menus, with menu style and depth settings that save as you change them,
+and previews it in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has
 a `noindex` tag on every page and a `robots.txt` that blocks search engines,
 ready to upload to S3.
 
@@ -227,7 +235,9 @@ and Ctrl/⌘+Shift+Z). Every edit, whether in the grid, a bulk edit, a sitemap
 move, a menu change, or prototype settings, is one step, so a bulk edit of
 1,500 pages comes back with one click. **History** lists recent edits with who
 made them. Undo goes back one edit at a time, newest first, and the last 200
-are kept per project. Imports aren't part of it, and undoing an edit only puts
+are kept per project. Because of that, removing menu entries or new pages and
+bulk edits don't ask first: they happen at once, and the message that says so
+has its own Undo button. Imports aren't part of it, and undoing an edit only puts
 back what the person changed, never older crawl numbers.
 
 The app has a light and a dark theme. It follows the device by default, and

@@ -580,9 +580,14 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                           lambda conn: describe_entry_edit(conn, item_id, body))
 
     @app.delete("/api/p/{slug}/nav/{item_id}")
-    def nav_remove(request: Request, slug: str, item_id: int):
-        return tree_write(request, slug, lambda conn: nav.remove(conn, item_id) or {"ok": True},
-                          lambda conn: 'Removed "{}" from the {}'.format(*history.entry_label(conn, item_id)))
+    def nav_remove(request: Request, slug: str, item_id: int, keep_children: bool = False):
+        def describe(conn) -> str:
+            name, menu = history.entry_label(conn, item_id)
+            below = 0 if keep_children else nav.count_below(conn, item_id)
+            under = f" and {below} entr{'y' if below == 1 else 'ies'} under it" if below else ""
+            kept = " (its sub-entries stay)" if keep_children and nav.count_below(conn, item_id) else ""
+            return f'Removed "{name}"{under} from the {menu}{kept}'
+        return tree_write(request, slug, lambda conn: {"removed": nav.remove(conn, item_id, keep_children)}, describe)
 
     def describe_entry_edit(conn, item_id: int, body) -> str:
         name, menu = history.entry_label(conn, item_id)
@@ -674,12 +679,15 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                            version_label: str = Form("v1"), csrf: str = Form("")):
         require_user(request)
         check_csrf(request, csrf)
+        as_json = request.headers.get("X-Requested-With") == "fetch"  # the page saves each change as it's made
         mega = menu == "mega"
         depth = max(1, min(dropdown_depth, 4)) if menu == "dropdown" else 0
         version = re.sub(r"[^A-Za-z0-9._-]", "", version_label)[:20] or "v1"
         try:
             sp.Settings(nav_style=nav_style, dropdown_depth=depth, mega_menu=mega)
         except ValueError as e:
+            if as_json:
+                return JSONResponse({"detail": str(e)}, status_code=400)
             return RedirectResponse(f"/p/{slug}/prototype?error={quote(str(e))}", status_code=303)
         with closing(open_project(slug)) as conn, recorded(request, conn, "Changed the prototype settings"):
             conn.execute(
@@ -687,6 +695,8 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 "max_depth = ?, version_label = ?",
                 (nav_style, depth, int(mega), int(bool(sticky_header)), max(0, min(max_depth, 10)), version))
         warm(slug)
+        if as_json:
+            return {"ok": True, "version_label": version}
         return RedirectResponse(f"/p/{slug}/prototype?saved=1", status_code=303)
 
     @app.get("/p/{slug}/prototype/download")

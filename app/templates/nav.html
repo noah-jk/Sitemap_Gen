@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Navigation · {{ project }}{% endblock %}
 {% block body_attrs %} data-slug="{{ slug }}" data-csrf="{{ csrf }}"{% endblock %}
-{% block main_class %}content wide{% endblock %}
+{% block main_class %}content full{% endblock %}
 {% block content %}
 <h1>Navigation</h1>
 <p class="muted small">Menus are separate from the sitemap. They start empty and you add what belongs in them; pages
@@ -70,6 +70,7 @@
   </form>
 </dialog>
 <script src="/static/vendor/Sortable.min.js"></script>
+<script src="/static/inline-edit.js"></script>
 <script src="/static/map-board.js"></script>
 <script src="/static/nav.js"></script>
 {% endblock %}

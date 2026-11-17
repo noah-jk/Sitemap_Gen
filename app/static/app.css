@@ -79,7 +79,7 @@ table.plain th, table.plain td { text-align: left; padding: 6px 8px; border-bott
 
 select, button { font: inherit; }
 select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); }
-button:not(.primary):not(.link):not(.badge) { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+button:not(.primary):not(.link):not(.badge):not(.tag) { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--card); color: var(--ink); cursor: pointer; }
 button.link { background: none; border: 0; padding: 0 2px; color: var(--accent); cursor: pointer; text-decoration: underline; }
 label.inline { flex-direction: row; align-items: center; gap: 6px; font-weight: 600; }
@@ -156,7 +156,8 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 .nav-list { min-height: 6px; }
 .menu-panel > .nav-list { padding-left: 0; border-top: 1px solid var(--line); }
 .results li button[aria-pressed="true"] { background: var(--paper); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
-@media (min-width: 1100px) { .menus { grid-template-columns: 3fr 2fr; } .menu-panel[data-menu="main"] { grid-row: span 2; } }
+/* Navigation list: the main menu gets the full width; utility nav and footer sit side by side below it */
+@media (min-width: 900px) { .menus { grid-template-columns: 1fr 1fr; } .menu-panel[data-menu="main"] { grid-column: 1 / -1; } }
 .tag.menu-tag { color: var(--accent); border-color: var(--accent); background: none; }
 .proto-frame { position: relative; }
 .building { position: absolute; inset: 1px; display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -337,3 +338,26 @@ legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
 /* Navigation list: collapsed entries hide their sub-list; leaves keep the toggle's space so labels line up */
 .nav-list[hidden] { display: none; }
 .tree-toggle-leaf { display: inline-block; flex: none; cursor: default; }
+/* Detail panel: values edited in place */
+.facts dd > select { padding: 3px 6px; max-width: 100%; }
+button.value-btn { padding: 3px 8px !important; text-align: left; max-width: 100%; overflow-wrap: anywhere;
+  border-style: dashed !important; font-size: 13px; }
+.warn-text > button.value-btn { color: var(--warn); border-color: var(--warn) !important; }
+
+/* Clickable tags: the page type in the Sitemap tab, and link/button in the main menu */
+button.tag { font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; border: 1px solid var(--line);
+  background: var(--card); color: var(--muted); line-height: 1.6; }
+button.tag:hover, button.tag:focus-visible { border-color: var(--accent); color: var(--accent); }
+.tag-edit::after { content: " ▾"; font-size: 9px; }
+.tag-toggle { border-style: dashed !important; }
+.tag-toggle.on { border-style: solid !important; background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tag-toggle.on:hover { color: var(--accent-ink); opacity: .9; }
+select.tag-select { margin-left: 6px; padding: 1px 4px; font-size: 12px; }
+/* Rename in place */
+.inline-editable { cursor: text; }
+.inline-editable:hover { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
+input.inline-input { padding: 2px 6px; font-weight: 600; max-width: 100%; }
+.history-toast { display: flex; align-items: center; gap: 14px; }
+.history-toast[hidden] { display: none; }
+button.toast-undo { padding: 3px 12px !important; background: transparent !important; color: var(--bar-ink) !important;
+  border: 1px solid currentColor !important; font-weight: 600; }

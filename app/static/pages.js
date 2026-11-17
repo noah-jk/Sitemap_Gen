@@ -228,20 +228,23 @@
     }
   }
 
+  // A combine or split without its target(s) yet goes through the redirect dialog first.
+  function needsTargets(data, field, value) {
+    if (field !== "recommendation" && field !== "decision") return false;
+    const after = Object.assign({}, data, {[field]: value});
+    const needs = NEEDS_TARGET.includes(effective(after));
+    return needs && (!data.redirect_to || (effective(after) === "split" && data.content_targets.length < 2));
+  }
+
   table.on("cellEdited", async (cell) => {
     const field = cell.getField();
     const row = cell.getRow();
     const data = row.getData();
     let value = cell.getValue();
     if (value === "") value = null;
-    if ((field === "recommendation" || field === "decision")) {
-      const after = Object.assign({}, data, {[field]: value});
-      const needs = NEEDS_TARGET.includes(effective(after));
-      const missing = !data.redirect_to || (effective(after) === "split" && data.content_targets.length < 2);
-      if (needs && missing) {
-        openDialog({row, pending: {[field]: value}, onCancel: () => cell.restoreOldValue()});
-        return;
-      }
+    if (needsTargets(data, field, value)) {
+      openDialog({row, pending: {[field]: value}, onCancel: () => cell.restoreOldValue()});
+      return;
     }
     const result = await send("PATCH", `/pages/${data.id}`, {changes: {[field]: value}, updated_at: data.updated_at});
     if (!result.ok && !result.data.row) cell.restoreOldValue();
@@ -404,7 +407,6 @@
     const ids = table.getSelectedData().map((r) => r.id);
     if (!all && !ids.length) { status.textContent = "Select some rows first, or tick “use all matching pages”."; return; }
     const field = $("bulk-field").value;
-    const fieldName = $("bulk-field").selectedOptions[0].textContent;
     const value = bulkValue.value;
     const count = all ? lastTotal : ids.length;
     const target = all
@@ -416,7 +418,9 @@
       if (!r.ok) { status.textContent = r.data.detail || `Not saved (${r.status}).`; return; }
       table.deselectRow();
       $("bulk-all").checked = false;
-      status.textContent = `Updated ${r.data.count} page${r.data.count === 1 ? "" : "s"}. ${r.data.warning || ""}`;
+      const done = `Updated ${r.data.count.toLocaleString()} page${r.data.count === 1 ? "" : "s"}.`;
+      status.textContent = `${done} ${r.data.warning || ""}`;
+      if (window.AppHistory) AppHistory.done(done);
       table.setPage(table.getPage());
     };
 
@@ -427,6 +431,7 @@
           table.deselectRow();
           $("bulk-all").checked = false;
           status.textContent = `Added ${added} entr${added === 1 ? "y" : "ies"} to the ${menuName}.`;
+          if (added && window.AppHistory) AppHistory.done(status.textContent);
           table.setPage(table.getPage());
         }});
       return;
@@ -438,7 +443,6 @@
       return;
     }
     if (field === "parent_id") {
-      if (count > 25 && !window.confirm(`Move ${pages} to the top level?`)) return;
       run({parent_id: null});
       return;
     }
@@ -447,7 +451,6 @@
         onSave: (redirectTo) => run({[field]: "combine", redirect_to: redirectTo})});
       return;
     }
-    if (count > 25 && !window.confirm(`Set ${fieldName} to “${value || "(clear)"}” on ${count.toLocaleString()} pages?`)) return;
     run({[field]: value || null});
   });
 
@@ -540,32 +543,63 @@
     const parts = [];
     if (d.problem) parts.push(el("p", {class: "dt-problem", role: "alert"}, el("span", {class: "problem-flag", text: "!"}), ` ${d.problem}`));
 
-    // Decision
-    const typeName = d.page_type ? TYPE_CHOICES[d.page_type] : d.sitemap ? `${TYPE_CHOICES[d.sitemap.type]} (auto)` : "Auto";
-    const targets = el("div");
-    if (d.redirect_label || NEEDS_TARGET.includes(d.decision || d.recommendation || "")) {
-      targets.append(facts([["Redirect to", d.redirect_label ? `${d.redirect_label} ${d.redirect_path || "(new page)"}` : "Not chosen"]]));
+    // Decision: every value is edited right where it shows.
+    const row = rowFor(d);
+    const edit = (field, value, options) => {
+      const select = el("select", {"aria-label": FIELD_TITLES[field]});
+      Object.entries(options).forEach(([v, text]) => select.append(el("option", {value: v, text})));
+      select.value = value || "";
+      select.addEventListener("change", () => changeField(row, field, select.value || null, select, value || ""));
+      return select;
+    };
+    const dispOptions = Object.fromEntries(choices.map((c) => [c, c || "—"]));
+    const autoType = d.sitemap ? `Auto (${TYPE_CHOICES[d.sitemap.type]})` : "Auto";
+    const typeOptions = Object.assign({"": autoType}, Object.fromEntries(Object.entries(TYPE_CHOICES).filter(([k]) => k)));
+    const disp = d.decision || d.recommendation || "";
+    const targetButton = (text, title) => {
+      const b = el("button", {type: "button", class: "value-btn", title, text});
+      b.addEventListener("click", () => openDialog({row}));
+      return b;
+    };
+    const pairs = [
+      ["Recommendation", edit("recommendation", d.recommendation, dispOptions)],
+      ["Final Decision", edit("decision", d.decision, dispOptions)],
+    ];
+    if (d.redirect_label || ["combine", "split", "delete"].includes(disp)) {
+      pairs.push(["Redirect to", d.redirect_label
+        ? targetButton(`${d.redirect_label} ${d.redirect_path || "(new page)"} ✎`, "Change where this page redirects")
+        : targetButton(disp === "delete" ? "None: the old URL will 404. Choose… ✎" : "Choose… ✎", "Choose the page to redirect to"),
+      !d.redirect_label && NEEDS_TARGET.includes(disp) ? "warn-text" : ""]);
     }
-    if (d.content_targets.length) {
-      targets.append(el("p", {class: "small muted", text: "Content goes to"}), el("ul", {class: "dt-list"}, ...d.content_targets.map(pageLink)));
+    if (disp === "split" || d.content_targets.length) {
+      pairs.push(["Content goes to", targetButton(d.content_targets.length
+        ? `${d.content_targets.map((t) => t.label).join(", ")} ✎` : "Choose… ✎", "Change which pages receive the content")]);
     }
-    const change = el("button", {type: "button", text: "Change decision or redirect…"});
-    change.addEventListener("click", () => detailRow && openDialog({row: detailRow}));
-    change.disabled = !detailRow;
-    parts.push(section("Decision", facts([
-      ["Recommendation", d.recommendation], ["Final Decision", d.decision], ["Status", d.status], ["Page type", typeName],
-    ]), targets, change));
+    pairs.push(["Status", edit("status", d.status, {todo: "todo", done: "done"})]);
+    pairs.push(["Page type", edit("page_type", d.page_type, typeOptions)]);
+    parts.push(section("Decision", facts(pairs)));
 
-    // Notes
+    // Notes: saved with the button, Ctrl/Cmd+Enter, or when you click away.
     const notes = el("textarea", {rows: "4", "aria-label": "Notes"});
     notes.value = d.notes || "";
     const save = el("button", {type: "button", class: "primary", text: "Save notes"});
     const saved = el("span", {class: "muted small", role: "status"});
-    save.addEventListener("click", async () => {
-      const r = await send("PATCH", `/pages/${d.id}`, {changes: {notes: notes.value}, updated_at: d.updated_at});
-      if (r.ok) { saved.textContent = "Saved."; if (detailRow) { detailRow.update(r.data.row); detailRow.reformat(); } loadDetail(d.id); }
-      else saved.textContent = r.data.detail || `Not saved (${r.status}).`;
-    });
+    const saveNotes = async () => {
+      if (notes.value === (d.notes || "")) return;
+      const r = await send("PATCH", `/pages/${d.id}`, {changes: {notes: notes.value}, updated_at: row.getData().updated_at});
+      if (r.ok) {
+        d.notes = notes.value;
+        saved.textContent = "Saved.";
+        row.update(r.data.row);
+        row.reformat();
+        loadDetail(d.id);
+      } else {
+        saved.textContent = r.data.detail || `Not saved (${r.status}).`;
+      }
+    };
+    save.addEventListener("click", saveNotes);
+    notes.addEventListener("blur", saveNotes);
+    notes.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNotes(); } });
     parts.push(section("Notes", notes, el("div", {class: "row"}, save, saved)));
 
     // Structure
@@ -607,6 +641,28 @@
     $("dt-body").replaceChildren(...parts);
     $("dt-prev").disabled = !neighbour(-1);
     $("dt-next").disabled = !neighbour(1);
+  }
+
+  const FIELD_TITLES = {recommendation: "Recommendation", decision: "Final Decision", status: "Status", page_type: "Page type"};
+
+  // The grid row for the open page, or a stand-in when the page isn't on the grid's current page.
+  function rowFor(d) {
+    if (detailRow && detailRow.getData().id === d.id) return detailRow;
+    let data = d.row;
+    return {getData: () => data, update: (fresh) => { data = Object.assign({}, data, fresh); }, reformat() {}, getElement: () => null};
+  }
+
+  async function changeField(row, field, value, select, old) {
+    const data = row.getData();
+    if (needsTargets(data, field, value)) {
+      openDialog({row, pending: {[field]: value}, onCancel: () => { select.value = old; }});
+      return;
+    }
+    select.disabled = true;
+    const result = await send("PATCH", `/pages/${data.id}`, {changes: {[field]: value}, updated_at: data.updated_at});
+    select.disabled = false;
+    if (!result.ok && !result.data.row) select.value = old;
+    report(result, row);
   }
 
   async function loadDetail(id) {

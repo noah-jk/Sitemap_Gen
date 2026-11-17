@@ -115,9 +115,9 @@ def test_menu_edits_undo(imported, hdr, tmp_path):
     first = imported.get("/api/p/example/nav").json()["menus"]["main"][0]["id"]
     imported.patch(f"/api/p/example/nav/{first}", json={"label": "Apply"}, headers=hdr)
     imported.patch(f"/api/p/example/nav/{first}", json={"is_button": True}, headers=hdr)
-    imported.delete(f"/api/p/example/nav/{first}", headers=hdr)  # its sub-entries move up
+    imported.delete(f"/api/p/example/nav/{first}", headers=hdr)  # with its sub-entries
     labels = [a["label"] for a in imported.get("/api/p/example/history").json()["actions"]][:3]
-    assert labels == ['Removed "Apply" from the main menu', 'Made "Apply" a button',
+    assert labels == ['Removed "Apply" and 2 entries under it from the main menu', 'Made "Apply" a button',
                       'Renamed "Admissions" in the main menu to "Apply"']
     for _ in range(3):
         assert undo(imported, hdr).status_code == 200

@@ -259,10 +259,22 @@ def update(conn: sqlite3.Connection, item_id: int, label: Optional[str] = None,
     _tx(conn, run)
 
 
-def remove(conn: sqlite3.Connection, item_id: int) -> None:
-    """Remove an entry; anything under it moves up into its place."""
-    def run() -> None:
+def count_below(conn: sqlite3.Connection, item_id: int) -> int:
+    return conn.execute(
+        "WITH RECURSIVE d(id) AS (SELECT id FROM nav_items WHERE parent_id = ? "
+        "UNION SELECT i.id FROM nav_items i JOIN d ON i.parent_id = d.id) SELECT count(*) FROM d", (item_id,)).fetchone()[0]
+
+
+def remove(conn: sqlite3.Connection, item_id: int, keep_children: bool = False) -> int:
+    """Remove an entry and everything under it, or with keep_children, only the entry: what was
+    under it moves up into its place. Returns how many entries were removed."""
+    def run() -> int:
         item = _item(conn, item_id)
+        if not keep_children:
+            below = count_below(conn, item_id)
+            conn.execute("DELETE FROM nav_items WHERE id = ?", (item_id,))  # sub-entries go with it (cascade)
+            _renumber(conn, item["menu"], item["parent_id"], _siblings(conn, item["menu"], item["parent_id"]))
+            return 1 + below
         if item["parent_id"] is None and item["menu"] in MAX_TOP:
             kids = conn.execute("SELECT count(*) FROM nav_items WHERE parent_id = ?", (item_id,)).fetchone()[0]
             if kids:
@@ -274,8 +286,9 @@ def remove(conn: sqlite3.Connection, item_id: int) -> None:
                      (item["parent_id"], now_ms(), item_id))
         conn.execute("DELETE FROM nav_items WHERE id = ?", (item_id,))
         _renumber(conn, item["menu"], item["parent_id"], ids[:at] + kids + ids[at + 1:])
+        return 1
 
-    _tx(conn, run)
+    return _tx(conn, run)
 
 
 def stamp(conn: sqlite3.Connection) -> tuple:
