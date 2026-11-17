@@ -479,3 +479,43 @@ def test_page_types_in_grid_bulk_and_audit(imported):
     assert ",list," in rows["https://www.example.edu/admissions"]
     assert ",form," in rows["https://www.example.edu/campus-life"]
     assert ",listing," in rows["https://www.example.edu/news"]          # auto, worked out from the sitemap
+
+
+def test_saved_views_keep_hidden_columns(imported):
+    token = grid_csrf(imported)
+    body = {"name": "Lean", "definition": {"view": "", "filters": [], "sorts": [],
+                                           "hidden": ["inlinks", "word_count", "label", "id; drop", "inlinks"]}}
+    saved = imported.post("/api/p/example/views", json=body, headers={"X-CSRF-Token": token}).json()
+    assert saved["definition"]["hidden"] == ["inlinks", "word_count"]  # Label can't be hidden; unknowns dropped
+    old = imported.post("/api/p/example/views", json={"name": "Old", "definition": {"view": "", "filters": [], "sorts": []}},
+                        headers={"X-CSRF-Token": token}).json()
+    assert "hidden" not in old["definition"]  # views saved without columns leave the columns alone
+
+
+def test_page_detail(imported):
+    token = grid_csrf(imported)
+    patch = patcher(imported, token)
+    contact = page_by_path(imported, "/admissions/contact")
+    target = page_by_path(imported, "/about/contact")
+    assert patch(contact, decision="combine", redirect_to=target["id"]).status_code == 200
+    adm = page_by_path(imported, "/admissions")
+    imported.post("/api/p/example/nav/pages", json={"menu": "main", "page_ids": [adm["id"]]}, headers={"X-CSRF-Token": token})
+
+    d = imported.get(f"/api/p/example/pages/{target['id']}/detail").json()
+    assert d["label"] == "Contact Us" and d["current_url"].endswith("/about/contact")
+    assert [p["url_path"] for p in d["incoming"]] == ["/admissions/contact"]
+    assert d["sitemap"]["type"] in ("article", "form") and d["row"]["id"] == target["id"]
+    assert "crawl_extra" in d and "hash" not in d
+
+    d = imported.get(f"/api/p/example/pages/{adm['id']}/detail").json()
+    assert d["menu_entries"] == [{"menu": "Main menu", "label": ""}]
+    assert d["sitemap"]["descendants"] >= 2 and d["trail"] == []
+    apply = page_by_path(imported, "/admissions/apply/first-year")
+    d = imported.get(f"/api/p/example/pages/{apply['id']}/detail").json()
+    assert [t["label"] for t in d["trail"]] == ["Admissions", "How to Apply"]
+    root = page_by_path(imported, "/")
+    d = imported.get(f"/api/p/example/pages/{root['id']}/detail").json()
+    assert d["variants"]  # the bare-host and http copies of the home page were merged into it
+    d = imported.get(f"/api/p/example/pages/{contact['id']}/detail").json()
+    assert d["sitemap"] is None and d["redirect_label"] == "Contact Us"  # being combined: not in the new sitemap
+    assert imported.get("/api/p/example/pages/999999/detail").status_code == 404

@@ -175,8 +175,14 @@ the content goes to. Rules are checked on every save: a combine or split needs
 a target, a target can't be a page that's being removed, and a split needs two
 or more pages including its redirect. Removing a page that others point at is
 allowed, and those pages show up in the **Problems** view. Bulk edits apply to
-the selected rows or to every page matching the current filters. Filters and
-sort can be saved as named views.
+the selected rows or to every page matching the current filters. Filters, sort,
+and the columns shown (**Columns** menu) can be saved as named views. The Label
+column stays in place while the grid scrolls sideways.
+
+Click a page's label to open its **detail panel**: where it sits in the new
+sitemap, its decision and redirect, notes (editable), menus, the pages it
+absorbs, every crawl column, GA4 traffic, and other URLs that point at it.
+↑ and ↓ (or J and K) step through the grid's rows, and Esc closes it.
 
 The sitemap and the menus are two related but separate structures.
 
