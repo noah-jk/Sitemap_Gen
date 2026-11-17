@@ -13,7 +13,7 @@ PASSWORD = "correct horse battery"
 
 @pytest.fixture
 def client(tmp_path):
-    app = create_app(str(tmp_path / "data"), secure_cookies=False, warm_delay=None)
+    app = create_app(str(tmp_path / "data"), secure_cookies=False)
     from app.db import Store
     auth.create_user(Store(str(tmp_path / "data")), "noah", PASSWORD)
     with TestClient(app) as c:
@@ -430,37 +430,35 @@ def test_nav_sub_pages_routes(imported):
     assert bad.status_code == 403
 
 
-def test_prototype_builds_in_background_once_per_burst(tmp_path, monkeypatch):
-    import threading, time
+def test_prototype_preview_renders_on_demand_and_rebuilds_only_when_it_changes(imported, monkeypatch):
+    import threading
     from app import tree as tree_mod
-    from app.db import Store
-    builds = []
-    real = tree_mod.render_files
-    monkeypatch.setattr(tree_mod, "render_files", lambda conn: builds.append(1) or real(conn))
-    app = create_app(str(tmp_path / "data"), secure_cookies=False, warm_delay=0.2)
-    auth.create_user(Store(str(tmp_path / "data")), "noah", PASSWORD)
-    with TestClient(app) as c:
-        login(c)
-        make_project(c)
-        token = csrf_from(c.get("/p/example/import").text)
-        c.post("/p/example/import", data={"csrf": token},
-               files={"file": ("crawl.csv", FIXTURE.read_bytes(), "text/csv")})
-        hdr = {"X-CSRF-Token": grid_csrf(c)}
-        for name in ("One", "Two", "Three"):          # a burst of edits
-            c.post("/api/p/example/tree/pages", json={"label": name}, headers=hdr)
-        html = c.get("/p/example/prototype").text      # opens without building
-        assert builds == []
-        deadline = time.time() + 5
-        while not builds and time.time() < deadline:
-            time.sleep(0.05)
-        time.sleep(0.3)
-        assert len(builds) == 1                        # one background build for the whole burst
-        preview = re.search(r'<iframe data-src="([^"]+)"', html)[1]
-        results = []
-        threads = [threading.Thread(target=lambda: results.append(c.get(preview).status_code)) for _ in range(3)]
-        [t.start() for t in threads]
-        [t.join() for t in threads]
-        assert results == [200, 200, 200] and len(builds) == 1   # served from the finished build
+    import sitemap2proto as sp
+    builds, renders = [], []
+    real_build, real_render = tree_mod.build_site, sp.render_file
+    monkeypatch.setattr(tree_mod, "build_site", lambda conn: builds.append(1) or real_build(conn))
+    monkeypatch.setattr(sp, "render_file", lambda path, *a, **k: renders.append(path) or real_render(path, *a, **k))
+    html = imported.get("/p/example/prototype").text      # the tab opens without building anything
+    assert builds == []
+    preview = re.search(r'<iframe data-src="([^"]+)"', html)[1]
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(imported.get(preview).status_code)) for _ in range(3)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert results == [200, 200, 200] and len(builds) == 1  # one build, however many requests arrive at once
+    assert set(renders) == {"index.html"}                  # and only the page asked for is rendered
+    base = preview.rsplit("/", 1)[0]
+    assert "Admissions" in imported.get(f"{base}/admissions/index.html").text
+    assert imported.get(f"{base}/nope.html").status_code == 404
+
+    # Auditing (notes, status, decisions that keep the page) doesn't rebuild; a rename does.
+    patch = patcher(imported, grid_csrf(imported))
+    patch(page_by_path(imported, "/admissions"), notes="check the hero copy", status="done")
+    imported.get(preview)
+    assert len(builds) == 1
+    patch(page_by_path(imported, "/admissions"), label="Admission")
+    assert "Admission" in imported.get(f"{base}/admission/index.html").text
+    assert len(builds) == 2
 
 
 def test_page_types_in_grid_bulk_and_audit(imported):
@@ -535,3 +533,54 @@ def test_prototype_settings_save_as_json_for_the_page_script(imported):
     # A plain form post (no script) still redirects back to the page.
     r = imported.post("/p/example/prototype/settings", data={"csrf": token, "nav_style": "grid"}, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].endswith("saved=1")
+
+
+def test_request_bodies_are_limited_before_login(client):
+    # Not logged in: an oversized body is refused from its declared size, before any parsing.
+    r = client.post("/p/example/import", content=b"x" * 10, headers={"Content-Length": str(60 * 1024 * 1024)})
+    assert r.status_code == 413
+    r = client.post("/api/p/example/pages/bulk", content=b"[" + b"1," * 600_000 + b"1]",
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 413
+    # Small bodies still reach the app (and get the usual answer for not being logged in).
+    assert client.post("/api/p/example/pages/bulk", json={"changes": {}}).status_code == 401
+
+
+def test_streamed_body_over_the_limit_is_cut_off(logged_in):
+    make_project(logged_in)
+    token = csrf_from(logged_in.get("/p/example/import").text)
+
+    def chunks():  # no Content-Length: the bytes are counted as they arrive
+        yield b"csrf=" + token.encode() + b"&x="
+        for _ in range(3):
+            yield b"y" * (512 * 1024)
+
+    r = logged_in.post("/projects", content=chunks(), headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 413
+
+
+def test_old_password_hashes_upgrade_at_login_without_logging_anyone_out(client, tmp_path):
+    import base64, hashlib
+    from app.db import Store
+    store = Store(str(tmp_path / "data"))
+    salt = b"0123456789abcdef"
+    old = hashlib.scrypt(PASSWORD.encode(), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
+    old_hash = f"scrypt$16384$8$1${base64.b64encode(salt).decode()}${base64.b64encode(old).decode()}"
+    with store.registry() as reg:
+        reg.execute("UPDATE users SET password_hash = ? WHERE username = 'noah'", (old_hash,))
+    assert login(client).status_code == 303
+    with store.registry() as reg:
+        new_hash, changed = reg.execute("SELECT password_hash, password_changed_at FROM users").fetchone()
+    assert new_hash.startswith(f"scrypt${auth.N}${auth.R}${auth.P}$") and changed == 0
+    assert client.get("/").status_code == 200  # still logged in
+
+
+def test_login_limiter_forgets_quiet_clients():
+    limiter = auth.LoginLimiter(limit=2, window=60)
+    for i in range(50):
+        assert not limiter.blocked(f"10.0.0.{i}")  # checking alone stores nothing
+    assert limiter._fails == {}
+    limiter.failed("a"); limiter.failed("a")
+    assert limiter.blocked("a") and not limiter.blocked("b")
+    limiter.reset("a")
+    assert not limiter.blocked("a") and limiter._fails == {}

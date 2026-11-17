@@ -224,7 +224,7 @@ set in the grid's Page type column or in bulk. Each type gets its own
 wireframe in the prototype, built from blocks (hero, cards, filters, item
 rows, fields…), and the type is in the content audit.
 
-The **Prototype** tab builds the clickable prototype from the sitemap (pages
+The **Prototype** tab shows the clickable prototype from the sitemap (pages
 and URLs) and the menus, with menu style and depth settings that save as you change them,
 and previews it in a sandboxed frame. The zip download (`<project>-sitemap-<version>.zip`) has
 a `noindex` tag on every page and a `robots.txt` that blocks search engines,
@@ -298,6 +298,18 @@ to fill the grid's Words column and the "Short pages" view: kept pages under
 200 words (Screaming Frog's own low-content cut-off), news and event items left
 out, which are good candidates to combine. The Import tab says when a crawl
 left Word Count or near duplicates empty.
+
+### Security notes
+
+- Logins use scrypt (OWASP-equivalent settings), at most 5 failed tries per visitor per 5
+  minutes, and a signed session cookie (SameSite=Strict, 14 days). Changing a password logs
+  out every browser that was logged in with the old one.
+- Every change needs a CSRF token, pages carry a strict Content-Security-Policy, and request
+  bodies are capped (1 MB, or 51 MB for a crawl upload) before anything reads them.
+- Prototype preview links work without logging in for 12 hours, so they can be shared. The
+  preview runs sandboxed, with no access to the app or its cookie.
+- Set `SITEMAP_SECURE_COOKIES=1` if the app is only ever reached over HTTPS.
+- `pip-audit -r requirements.txt` checks the pinned packages for known vulnerabilities.
 
 ## Tests
 

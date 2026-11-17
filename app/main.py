@@ -10,6 +10,7 @@ import json
 import os
 import secrets
 import threading
+from collections import OrderedDict
 from contextlib import closing
 from datetime import date
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from itsdangerous import BadSignature, URLSafeTimedSerializer
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 import sitemap2proto as sp
@@ -30,6 +32,8 @@ from app.db import DISPOSITIONS, SLUG_RE, Store, now_ms
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 PAGE_SIZE_MAX = 500
+MAX_BODY_BYTES = 1024 * 1024                       # every request except a crawl upload
+UPLOAD_PATH = re.compile(r"/p/[a-z0-9-]+/import")  # room for the file plus the form around it
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -107,9 +111,73 @@ class NavEdit(BaseModel):
     is_button: Optional[bool] = None
 
 
-def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None,
-               warm_delay: Optional[float] = 1.0) -> FastAPI:
-    """warm_delay: seconds after an edit before the prototype is rebuilt in the background (None: never)."""
+class BodyLimit:
+    """Refuse request bodies over the limit before anything reads them: forms and uploads are parsed
+    before an endpoint can check the login, so without this anyone could make the app spool a huge
+    upload to disk. Checks Content-Length up front and counts the bytes as they arrive."""
+
+    def __init__(self, app, limit: int = MAX_BODY_BYTES, upload_limit: int = MAX_UPLOAD_BYTES + MAX_BODY_BYTES):
+        self.app, self.limit, self.upload_limit = app, limit, upload_limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        upload = scope["method"] == "POST" and UPLOAD_PATH.fullmatch(scope["path"])
+        limit = self.upload_limit if upload else self.limit
+        for name, value in scope["headers"]:
+            if name == b"content-length":
+                if not value.isdigit() or int(value) > limit:
+                    return await _too_large(send)
+        received = 0
+
+        async def counted():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    raise StarletteHTTPException(413, "Request body too large.")
+            return message
+
+        await self.app(scope, counted, send)
+
+
+async def _too_large(send) -> None:
+    body = b'{"detail":"Request body too large."}'
+    await send({"type": "http.response.start", "status": 413,
+                "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
+
+
+class Prototype:
+    """A project's prototype: the site structure, built once per change, and the most recently
+    viewed preview pages. Pages render on request, so a big site never sits in memory whole."""
+    KEEP = 200
+
+    def __init__(self, stamp: str, site: sp.Site, settings: sp.Settings):
+        self.stamp, self.site, self.settings = stamp, site, settings
+        self.index = sp.file_index(site, settings)
+        self.rendered: "OrderedDict[str, str]" = OrderedDict()
+        self.lock = threading.Lock()
+
+    def file(self, path: str) -> Optional[str]:
+        with self.lock:
+            if path in self.rendered:
+                self.rendered.move_to_end(path)
+                return self.rendered[path]
+        content = sp.render_file(path, self.site, self.settings, self.index)  # outside the lock
+        if content is not None:
+            with self.lock:
+                self.rendered[path] = content
+                while len(self.rendered) > self.KEEP:
+                    self.rendered.popitem(last=False)
+        return content
+
+    def all_files(self) -> Dict[str, str]:
+        return sp.render_site(self.site, self.settings)
+
+
+def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bool] = None) -> FastAPI:
     store = Store(data_directory or config.data_dir())
     store.migrate_all()
     limiter = auth.LoginLimiter()
@@ -120,36 +188,37 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         SessionMiddleware, secret_key=config.secret_key(store.data_dir), session_cookie="sitemap_session",
         max_age=14 * 24 * 3600, same_site="strict",
         https_only=config.secure_cookies() if secure_cookies is None else secure_cookies)
+    app.add_middleware(BodyLimit)  # added last, so it runs first
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
     preview_signer = URLSafeTimedSerializer(config.secret_key(store.data_dir), salt="prototype-preview")
-    prototype_cache: Dict[str, tuple] = {}
+    prototypes: Dict[str, Prototype] = {}
     cache_lock = threading.Lock()
     build_locks: Dict[str, threading.Lock] = {}
-    warm_timers: Dict[str, threading.Timer] = {}
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
-        preview = request.url.path.startswith("/preview/")
+        path = request.scope["path"]  # the routed path, not the URL rebuilt from the Host header
+        preview = path.startswith("/preview/")
         response.headers["Content-Security-Policy"] = PREVIEW_CSP if preview else CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN" if preview else "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
-        if not request.url.path.startswith("/static/"):
+        if not path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.exception_handler(NotLoggedIn)
     async def not_logged_in(request: Request, exc: NotLoggedIn):
-        if request.url.path.startswith("/api/"):
+        if request.scope["path"].startswith("/api/"):
             return JSONResponse({"detail": "not logged in"}, status_code=401)
         return RedirectResponse("/login", status_code=303)
 
     @app.exception_handler(FormExpired)
     async def form_expired(request: Request, exc: FormExpired):
-        if request.url.path.startswith("/api/"):
+        if request.scope["path"].startswith("/api/"):
             return JSONResponse({"detail": "This page has expired. Reload it and try again."}, status_code=403)
-        if request.url.path == "/login":
+        if request.scope["path"] == "/login":
             return render(request, "login.html", status_code=403,
                           error="The login page had expired. Enter your details again.")
         return render(request, "expired.html", status_code=403)
@@ -303,7 +372,6 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             return import_page(request, slug, 400, f"Couldn't read the CSV: {e}")
         finally:
             text.detach()
-        warm(slug)
         return RedirectResponse(f"/p/{slug}/import", status_code=303)
 
     # ---- exports -----------------------------------------------------------
@@ -391,7 +459,6 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             except rules.RuleError as e:
                 return JSONResponse({"detail": str(e), "row": row_dict(grid.one_row(conn, page_id))},
                                     status_code=400)
-            warm(slug)
             return {"row": row_dict(grid.one_row(conn, page_id)), "warning": warning}
 
     @app.post("/api/p/{slug}/pages/bulk")
@@ -411,7 +478,6 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                     rec.label = label.replace("{count}", f"{count} page{'' if count == 1 else 's'}")
             except rules.RuleError as e:
                 return JSONResponse({"detail": str(e)}, status_code=400)
-        warm(slug)
         return {"count": count, "warning": warning}
 
     @app.get("/api/p/{slug}/pages/{page_id}/detail")
@@ -504,7 +570,6 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                     if isinstance(result, dict) and "added" in result:
                         n = result["added"]
                         rec.label = label.replace("{added}", f"{n} entr{'y' if n == 1 else 'ies'}")
-                warm(slug)
                 return result
             except KeyError:
                 raise HTTPException(404, "That page no longer exists.")
@@ -614,7 +679,6 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 return JSONResponse({"detail": str(e)}, status_code=400)
             except history.Stale as e:
                 return JSONResponse({"detail": str(e)}, status_code=409)
-            warm(slug)
             return {"label": label, **history.recent(conn)}
 
     @app.post("/api/p/{slug}/history/undo")
@@ -627,38 +691,20 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
 
     # ---- prototype ---------------------------------------------------------
 
-    def prototype_files(slug: str, conn) -> Dict[str, str]:
-        """The built prototype, rebuilt only when something it depends on changed. One build per
-        project at a time: a request that arrives mid-build waits for it instead of starting another."""
+    def prototype(slug: str, conn) -> Prototype:
+        """The project's prototype, rebuilt only when something it shows has changed. One build per
+        project at a time: a request that arrives mid-build waits for it instead of starting another.
+        Building is just the site structure (tens of milliseconds); pages render when asked for."""
         with cache_lock:
             lock = build_locks.setdefault(slug, threading.Lock())
         with lock:
             current = tree.stamp(conn)
-            cached = prototype_cache.get(slug)
-            if cached and cached[0] == current:
-                return cached[1]
-            files = tree.render_files(conn)
-            prototype_cache[slug] = (current, files)
-            return files
-
-    def warm(slug: str) -> None:
-        """Rebuild the prototype shortly after an edit, so the Prototype tab is ready when opened.
-        Edits in quick succession restart the countdown, so a burst of edits means one build."""
-        if warm_delay is None:
-            return
-
-        def run() -> None:
-            with closing(store.project(slug)) as conn:
-                prototype_files(slug, conn)
-
-        with cache_lock:
-            previous = warm_timers.pop(slug, None)
-            if previous:
-                previous.cancel()
-            timer = threading.Timer(warm_delay, run)
-            timer.daemon = True
-            warm_timers[slug] = timer
-            timer.start()
+            cached = prototypes.get(slug)
+            if cached and cached.stamp == current:
+                return cached
+            site, settings = tree.build_site(conn)
+            prototypes[slug] = Prototype(current, site, settings)
+            return prototypes[slug]
 
     @app.get("/p/{slug}/prototype", response_class=HTMLResponse)
     def prototype_view(request: Request, slug: str, saved: str = "", error: str = ""):
@@ -694,7 +740,6 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 "UPDATE settings SET nav_style = ?, dropdown_depth = ?, mega_menu = ?, sticky_header = ?, "
                 "max_depth = ?, version_label = ?",
                 (nav_style, depth, int(mega), int(bool(sticky_header)), max(0, min(max_depth, 10)), version))
-        warm(slug)
         if as_json:
             return {"ok": True, "version_label": version}
         return RedirectResponse(f"/p/{slug}/prototype?saved=1", status_code=303)
@@ -703,7 +748,7 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     def prototype_download(request: Request, slug: str):
         require_user(request)
         with closing(open_project(slug)) as conn:
-            files = prototype_files(slug, conn)
+            files = prototype(slug, conn).all_files()  # the whole site, only when downloading
             version = tree.settings_row(conn)["version_label"]
         filename = f"{slug}-sitemap-{version}.zip"
         return Response(sp.write_zip(files), media_type="application/zip",
@@ -716,14 +761,15 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         except BadSignature:
             raise HTTPException(404)
         with closing(open_project(slug)) as conn:
-            files = prototype_files(slug, conn)
+            proto = prototype(slug, conn)
         path = path or "index.html"
         if path.endswith("/"):
             path += "index.html"
-        if path not in files:
+        content = proto.file(path)
+        if content is None:
             raise HTTPException(404)
         kind = PREVIEW_TYPES.get(path.rsplit(".", 1)[-1], "text/plain")
-        return Response(files[path].encode("utf-8"), media_type=f"{kind}; charset=utf-8")
+        return Response(content.encode("utf-8"), media_type=f"{kind}; charset=utf-8")
 
     return app
 

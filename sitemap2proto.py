@@ -1125,15 +1125,40 @@ def all_pages(site: Site) -> List[Node]:
     return pages + site.standalone
 
 
+ROBOTS_TXT = "User-agent: *\nDisallow: /\n"
+
+
+def file_index(site: Site, settings: Settings = Settings()) -> Dict[str, Optional[Node]]:
+    """Every output path, in output order: pages map to their node, the other files to None."""
+    index: Dict[str, Optional[Node]] = {"style.css": None}
+    for node in all_pages(site):
+        index[node.out_path] = node
+    index["sitemap.html"] = None
+    if settings.noindex:
+        index["robots.txt"] = None
+    return index
+
+
+def render_file(path: str, site: Site, settings: Settings = Settings(),
+                index: Optional[Dict[str, Optional[Node]]] = None) -> Optional[str]:
+    """RENDER one output file (None if the site has no such path). Rendering reads the site and
+    never changes it, so a server can render pages on request, from several threads."""
+    index = file_index(site, settings) if index is None else index
+    if path not in index:
+        return None
+    if path == "style.css":
+        return STYLE
+    if path == "sitemap.html":
+        return render_visual_sitemap(site.root, settings.noindex)
+    if path == "robots.txt":
+        return ROBOTS_TXT
+    return render_page(index[path], site, settings)
+
+
 def render_site(site: Site, settings: Settings = Settings()) -> Dict[str, str]:
     """RENDER: every output file as {relative path: content}. Nothing touches disk."""
-    files = {"style.css": STYLE}
-    for node in all_pages(site):
-        files[node.out_path] = render_page(node, site, settings)
-    files["sitemap.html"] = render_visual_sitemap(site.root, settings.noindex)
-    if settings.noindex:
-        files["robots.txt"] = "User-agent: *\nDisallow: /\n"
-    return files
+    index = file_index(site, settings)
+    return {path: render_file(path, site, settings, index) for path in index}
 
 
 OUTPUT_MARKERS = ("style.css", "sitemap.html")

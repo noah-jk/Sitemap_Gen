@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  // The preview frame is built on request; keep the "Building…" note up until it has loaded.
+  // Preview pages render when asked for; keep the "Loading…" note up until the frame has loaded.
   const frame = document.getElementById("preview");
   const note = document.getElementById("building");
   const status = document.getElementById("proto-status");
@@ -31,7 +31,7 @@
       if (!resp.ok) {
         status.textContent = data.detail || "Not saved. Reload the page and try again.";
       } else {
-        status.textContent = "Saved. Rebuilding the preview…";
+        status.textContent = "Saved. Reloading the preview…";
         document.getElementById("zip-version").textContent = data.version_label;
         label.value = data.version_label;
         reloadPreview();

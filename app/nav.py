@@ -289,7 +289,3 @@ def remove(conn: sqlite3.Connection, item_id: int, keep_children: bool = False) 
         return 1
 
     return _tx(conn, run)
-
-
-def stamp(conn: sqlite3.Connection) -> tuple:
-    return tuple(conn.execute("SELECT count(*), max(updated_at), total(sort_order) FROM nav_items").fetchone())
