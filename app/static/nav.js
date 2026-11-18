@@ -388,8 +388,26 @@
     $("add-save").textContent = n ? `Add ${n} page${n === 1 ? "" : "s"}` : "Add";
   }
 
+  async function createPage(label) {
+    const r = await send("POST", "/nav/new-page", {menu: adding.menu, parent_id: adding.parentId, label});
+    if (!r.ok) { $("add-error").textContent = r.data.detail || "That didn't work."; return; }
+    if (adding.parentId !== null) { closed.delete(adding.parentId); rememberClosed(); }
+    dialog.close();
+    status.textContent = `Made the new page “${label.trim()}” and added it here. It's in the sitemap ${r.data.sitemap_parent
+      ? `under “${r.data.sitemap_parent}”` : "at the top level"}.`;
+    await load();
+  }
+
+  // The page a menu entry stands for, if it is one (headings aren't).
+  function entryPage(id) {
+    let found = null;
+    const walk = (items) => items.forEach((i) => { if (i.id === id) found = i; walk(i.children); });
+    Object.values(menus || {}).forEach(walk);
+    return found && !found.heading ? found.page_label : null;
+  }
+
   function openAdd(menu, parentId, parentLabel) {
-    adding = {menu, parentId, chosen: new Map()};
+    adding = {menu, parentId, parentLabel, parentPage: parentId !== null ? entryPage(parentId) : null, chosen: new Map()};
     $("add-title").textContent = parentLabel ? `Add pages under “${parentLabel}”` : `Add pages to the ${MENU_NAMES[menu]}`;
     $("add-search").value = "";
     $("add-results").replaceChildren();
@@ -407,6 +425,12 @@
       const q = $("add-search").value.trim();
       if (!q) { $("add-results").replaceChildren(); return; }
       const pages = await (await fetch(api(`/targets?q=${encodeURIComponent(q)}`))).json();
+      // Spotted a gap while building the menu: make the page right here.
+      const create = el("button", {type: "button", class: "create-page"},
+        el("span", {text: `+ Create new page “${q}”`}),
+        el("span", {class: "muted", text: ` ${adding.parentPage ? `(also added to the sitemap, under “${adding.parentPage}”)`
+          : adding.parentId === null ? "(also added to the top level of the sitemap)" : "(also added to the sitemap)"}`}));
+      create.addEventListener("click", () => createPage(q));
       $("add-results").replaceChildren(...(pages.length ? pages.map((p) => {
         const b = el("button", {type: "button", "aria-pressed": String(adding.chosen.has(p.id))},
           el("span", {text: p.label}), el("span", {class: "muted", text: ` ${p.url_path || "(new page)"}`}));
@@ -416,7 +440,7 @@
           updateCount();
         });
         return el("li", {}, b);
-      }) : [el("li", {class: "muted", text: "No matching pages."})]));
+      }) : [el("li", {class: "muted", text: "No matching pages."})]), el("li", {}, create));
     }, 200);
   });
 

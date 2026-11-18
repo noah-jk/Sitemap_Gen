@@ -361,3 +361,12 @@ input.inline-input { padding: 2px 6px; font-weight: 600; max-width: 100%; }
 .history-toast[hidden] { display: none; }
 button.toast-undo { padding: 3px 12px !important; background: transparent !important; color: var(--bar-ink) !important;
   border: 1px solid currentColor !important; font-weight: 600; }
+
+/* Planning: new pages' planned URLs in the grid, and the panel's planning fields */
+.planned { color: var(--muted); font-style: italic; }
+.tag.tag-new { margin: 0 2px 0 0; font-style: normal; color: var(--accent); border-color: var(--accent); background: none; }
+.facts dd > input[type=text] { width: 100%; padding: 4px 8px; }
+.dt-field { display: flex; flex-direction: column; gap: 4px; }
+.dt-field textarea { width: 100%; resize: vertical; font: inherit; }
+#bulk-text { width: 180px; }
+.results li button.create-page { border-style: dashed; color: var(--accent); }

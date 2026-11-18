@@ -185,7 +185,9 @@ def _restore(conn, table: str, key: dict, have: Optional[dict], want: Optional[d
 
 FIELD_NAMES = {"label": "Name", "recommendation": "Recommendation", "decision": "Final Decision",
                "status": "Status", "notes": "Notes", "redirect_to": "Redirect to", "parent_id": "Parent",
-               "page_type": "Page type", "content_targets": "Content goes to", "is_button": "Button"}
+               "page_type": "Page type", "content_targets": "Content goes to", "is_button": "Button",
+               "new_url": "New URL", "owner": "Owner", "writer": "Writer", "priority": "Priority",
+               "suggested_content": "Suggested content"}
 MENU_NAMES = {"main": "main menu", "utility": "utility nav", "footer": "footer"}
 
 
@@ -221,6 +223,8 @@ def describe_change(conn, page_id: int, changes: dict) -> str:
         return f'Changed where "{name}" goes'
     if "notes" in changes:
         return f'Edited notes on "{name}"'
+    if "suggested_content" in changes:
+        return f'Edited suggested content on "{name}"'
     field = next(iter(changes), "")
     if field in FIELD_NAMES:
         return _set(conn, FIELD_NAMES[field], field, changes[field], f'"{name}"')

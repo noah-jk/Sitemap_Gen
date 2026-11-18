@@ -192,3 +192,12 @@ def test_only_recent_actions_are_kept(tmp_path):
         labels = [r[0] for r in conn.execute("SELECT label FROM actions ORDER BY id")]
         assert len(labels) == 200 and labels[0] == "edit 5" and labels[-1] == "edit 204"
         assert conn.execute("SELECT count(*) FROM action_rows").fetchone()[0] == 200
+
+
+def test_new_page_from_a_menu_is_one_undo(imported, hdr, tmp_path):
+    before = state(tmp_path)
+    r = imported.post("/api/p/example/nav/new-page", json={"menu": "main", "label": "Visit"}, headers=hdr)
+    assert r.status_code == 200 and r.json()["sitemap_parent"] is None
+    assert imported.get("/api/p/example/history").json()["undo"] == 'Added new page "Visit" to the main menu'
+    assert undo(imported, hdr).status_code == 200
+    assert state(tmp_path) == before

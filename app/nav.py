@@ -208,6 +208,47 @@ def add_subpages(conn: sqlite3.Connection, item_id: int, depth: int = 1) -> int:
     return _tx(conn, run)
 
 
+def sitemap_parent(conn, parent: Optional[int]) -> Optional[int]:
+    """The page a new page made at this spot in a menu belongs under in the sitemap: the nearest
+    menu entry above it that is a page still being kept (headings are skipped), or the top level."""
+    from app import rules
+    item_id = parent
+    while item_id is not None:
+        item = _item(conn, item_id)
+        if item["page_id"] is not None:
+            try:
+                rules.check_parent(conn, [], item["page_id"])
+                return item["page_id"]
+            except rules.RuleError:  # being removed: look further up
+                pass
+        item_id = item["parent_id"]
+    return None
+
+
+def add_new_page(conn: sqlite3.Connection, menu: str, parent: Optional[int], label: str) -> dict:
+    """A page that doesn't exist yet, made from the menu: it goes into the sitemap (under
+    sitemap_parent) and into the menu at this spot, together."""
+    from app import tree
+    label = tree._clean_label(label)
+
+    def run() -> dict:
+        _check_place(conn, menu, parent, 1)
+        under = sitemap_parent(conn, parent)
+        last = conn.execute("SELECT COALESCE(max(sort_order), 0) FROM pages WHERE parent_id IS ?", (under,)).fetchone()[0]
+        now = now_ms()
+        page_id = conn.execute(
+            "INSERT INTO pages(is_new, label, parent_id, sort_order, provenance, updated_at) "
+            "VALUES (1, ?, ?, ?, 'designed', ?)", (label, under, last + 10, now)).lastrowid
+        order = len(_siblings(conn, menu, parent)) + 1
+        item_id = conn.execute(
+            "INSERT INTO nav_items(menu, parent_id, page_id, sort_order, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (menu, parent, page_id, order * 10, now)).lastrowid
+        under_label = conn.execute("SELECT label FROM pages WHERE id = ?", (under,)).fetchone() if under else None
+        return {"page_id": page_id, "item_id": item_id, "sitemap_parent": under_label["label"] if under_label else None}
+
+    return _tx(conn, run)
+
+
 def add_heading(conn: sqlite3.Connection, menu: str, parent: Optional[int], label: str) -> int:
     label = _clean_label(label)
     if not label:

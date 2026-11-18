@@ -118,3 +118,37 @@ def test_markdown_sitemap_round_trips_through_the_generator(conn):
     root = sp.parse_markdown(text)
     count = sum(1 for _ in sp.all_pages(sp.Site(root))) - 1
     assert count == len(lines)
+
+
+def test_redirects_to_new_pages_and_moved_pages(conn):
+    from app import tree
+    adm = pid(conn, "/admissions")
+    visit = tree.create_page(conn, "Visit Campus", adm)
+    decide(conn, "/admissions/contact", decision="combine", redirect_to=visit)
+    decide(conn, "/admissions", new_url="/admission")      # stays, but moves
+    m = exports.redirect_map(conn)
+    rows = {r[1]: r for r in m.rows}
+    # Into a new page: its planned URL follows the sitemap (and its parent's new URL).
+    assert rows["/admissions/contact"][3] == "https://www.example.edu/admission/visit-campus"
+    assert rows["/admissions"][0] == "moved" and rows["/admissions"][3] == "https://www.example.edu/admission"
+    # Old redirects into the moved page (one through another) go straight to its new URL.
+    assert rows["/moved"][3] == "https://www.example.edu/admission"
+    assert rows["/older"][3] == "https://www.example.edu/admission"
+    assert not m.unresolved and m.ok
+
+
+def test_content_audit_has_planning_columns(conn):
+    from app import tree
+    visit = tree.create_page(conn, "Visit Campus", pid(conn, "/admissions"))
+    ts = conn.execute("SELECT updated_at FROM pages WHERE id = ?", (visit,)).fetchone()[0]
+    rules.apply_changes(conn, visit, {"owner": "Admissions", "writer": "Sam", "priority": "high",
+                                      "suggested_content": "Tour times, map, parking"}, ts)
+    decide(conn, "/admissions/contact", decision="combine", redirect_to=visit)
+    rows = {r["Label"]: r for r in read_csv(exports.content_audit_csv(conn))}
+    new = rows["Visit Campus"]
+    assert new["Address"] == "" and new["New URL"] == "https://www.example.edu/admissions/visit-campus"
+    assert (new["Owner"], new["Writer"], new["Priority"], new["Suggested Content"]) == (
+        "Admissions", "Sam", "high", "Tour times, map, parking")
+    contact = [r for r in read_csv(exports.content_audit_csv(conn)) if r["Address"].endswith("/admissions/contact")][0]
+    assert contact["Redirect To"] == "https://www.example.edu/admissions/visit-campus"
+    assert rows["How to Apply"]["New URL"] == ""   # unchanged pages leave it empty

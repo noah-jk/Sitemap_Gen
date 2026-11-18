@@ -26,7 +26,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 import sitemap2proto as sp
-from app import auth, config, exports, grid, history, importer, nav, rules, tree
+from app import auth, config, exports, grid, history, importer, nav, rules, tree, urls
 from app.db import DISPOSITIONS, SLUG_RE, Store, now_ms
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -94,6 +94,12 @@ class SubPages(BaseModel):
 
 
 class NavHeading(BaseModel):
+    menu: str
+    parent_id: Optional[int] = None
+    label: str
+
+
+class NavNewPage(BaseModel):
     menu: str
     parent_id: Optional[int] = None
     label: str
@@ -418,10 +424,16 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
 
     # ---- pages grid --------------------------------------------------------
 
-    def row_dict(row) -> dict:
+    def row_dict(row, planned: Optional[Dict[int, str]] = None) -> dict:
         d = dict(row)
         d["content_targets"] = json.loads(d["content_targets"] or "[]")
+        if planned is not None:
+            d["planned_url"] = planned.get(d["id"], "")
         return d
+
+    def one(conn, page_id: int) -> dict:
+        """A grid row, with its planned URL."""
+        return row_dict(grid.one_row(conn, page_id), urls.planned(conn))
 
     @app.get("/p/{slug}/pages", response_class=HTMLResponse)
     def pages_view(request: Request, slug: str):
@@ -440,8 +452,9 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             total, rows = grid.page_rows(conn, grid.bracket_params(items, "filter"),
                                          grid.bracket_params(items, "sort"), view, max(1, page), size)
             problem_count = len(rules.problems(conn))
+            planned = urls.planned(conn)
         return {"last_page": max(1, -(-total // size)), "last_row": total, "problem_count": problem_count,
-                "data": [row_dict(r) for r in rows]}
+                "data": [row_dict(r, planned) for r in rows]}
 
     @app.patch("/api/p/{slug}/pages/{page_id}")
     def edit_page(request: Request, slug: str, page_id: int, edit: Edit):
@@ -455,11 +468,11 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                 raise HTTPException(404, "That page no longer exists.")
             except rules.Conflict:
                 return JSONResponse({"detail": "Someone else changed this row first. It now shows their version.",
-                                     "row": row_dict(grid.one_row(conn, page_id))}, status_code=409)
+                                     "row": one(conn, page_id)}, status_code=409)
             except rules.RuleError as e:
-                return JSONResponse({"detail": str(e), "row": row_dict(grid.one_row(conn, page_id))},
+                return JSONResponse({"detail": str(e), "row": one(conn, page_id)},
                                     status_code=400)
-            return {"row": row_dict(grid.one_row(conn, page_id)), "warning": warning}
+            return {"row": one(conn, page_id), "warning": warning}
 
     @app.post("/api/p/{slug}/pages/bulk")
     def bulk_edit(request: Request, slug: str, bulk: Bulk):
@@ -487,7 +500,8 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
             detail = grid.page_detail(conn, page_id)
             if detail is None:
                 raise HTTPException(404, "That page no longer exists.")
-            detail["row"] = row_dict(grid.one_row(conn, page_id))
+            detail["row"] = one(conn, page_id)
+            detail["planned_url"] = detail["row"]["planned_url"]
         return detail
 
     @app.get("/api/p/{slug}/pages/{page_id}/content-targets")
@@ -630,6 +644,12 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     def nav_add_heading(request: Request, slug: str, body: NavHeading):
         return tree_write(request, slug, lambda conn: {"id": nav.add_heading(conn, body.menu, body.parent_id, body.label)},
                           lambda conn: f'Added heading "{" ".join(body.label.split())}" to the '
+                                       f'{history.MENU_NAMES.get(body.menu, "menu")}')
+
+    @app.post("/api/p/{slug}/nav/new-page")
+    def nav_new_page(request: Request, slug: str, body: NavNewPage):
+        return tree_write(request, slug, lambda conn: nav.add_new_page(conn, body.menu, body.parent_id, body.label),
+                          lambda conn: f'Added new page "{" ".join(body.label.split())}" to the '
                                        f'{history.MENU_NAMES.get(body.menu, "menu")}')
 
     @app.post("/api/p/{slug}/nav/move")
