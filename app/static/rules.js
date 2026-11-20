@@ -1,5 +1,5 @@
-// The Rules tab: your rule library (saved to your account), the if-then builder, preview and
-// apply for this project, and where page dates come from. Everything is built with DOM nodes and
+// The Rules tab: your rule list (saved to your account), with the if-then builder, previews, and
+// where page dates come from each in a dialog that closes when you're done. Everything is built with DOM nodes and
 // textContent; nothing from a rule or a page is ever inserted as HTML.
 (function () {
   "use strict";
@@ -38,37 +38,6 @@
   let toRun = new Set();
   try { toRun = new Set(JSON.parse(localStorage.getItem(RUN_KEY) || "[]")); } catch (e) { /* private mode */ }
   const rememberRun = () => { try { localStorage.setItem(RUN_KEY, JSON.stringify([...toRun])); } catch (e) { /* ignore */ } };
-
-  // ---- the library -------------------------------------------------------------
-
-  let sortable = null;
-  function drawList() {
-    const list = $("rule-list");
-    list.replaceChildren(...library.map((r) => {
-      const box = el("input", {type: "checkbox", "aria-label": `Run “${r.name}”`});
-      box.checked = toRun.has(r.id);
-      box.addEventListener("change", () => { if (box.checked) toRun.add(r.id); else toRun.delete(r.id); rememberRun(); });
-      const name = el("button", {type: "button", class: "link rule-name", text: r.name});
-      name.addEventListener("click", () => edit(r));
-      const li = el("li", {"data-id": r.id, class: current && current.id === r.id ? "current" : ""},
-        el("span", {class: "tree-handle", title: "Drag to reorder", "aria-hidden": "true", text: "⠿"}), box, name);
-      return li;
-    }));
-    $("rule-list-empty").hidden = library.length > 0;
-    if (sortable) sortable.destroy();
-    sortable = Sortable.create(list, {handle: ".tree-handle", animation: 120, onEnd: async () => {
-      const ids = [...list.children].map((li) => Number(li.dataset.id));
-      library.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
-      await send("POST", "/api/rules/order", {ids});
-    }});
-  }
-
-  async function loadLibrary() {
-    const data = await (await fetch("/api/rules")).json();
-    schema = data.schema;
-    library = data.rules;
-    drawList();
-  }
 
   // ---- the editor --------------------------------------------------------------
 
@@ -134,8 +103,14 @@
     }
     const remove = el("button", {type: "button", class: "link", "aria-label": "Remove this condition", text: "✕"});
     remove.addEventListener("click", () => { group.splice(index, 1); markDirty(); drawEditor(); });
-    const hint = info.type === "path" && c.op.includes("matches")
-      ? el("span", {class: "muted small", text: "* = one folder, ** = any depth"}) : "";
+    let hint = "";
+    if (info.type === "path" && c.op.includes("matches")) {
+      hint = el("span", {class: "muted small", text: "* = one folder, ** = any depth"});
+    } else if (info.type === "date") {
+      const where = el("button", {type: "button", class: "link small", text: "Where dates come from…"});
+      where.addEventListener("click", openDates);
+      hint = el("span", {class: "muted small"}, document.createTextNode(`${coverageText()} `), where);
+    }
     return el("div", {class: "cond-row"}, fieldSel, opSel, valueEl, remove, hint);
   }
 
@@ -207,13 +182,11 @@
   }
 
   function drawEditor() {
-    $("editor").hidden = !current;
-    $("editor-empty").hidden = !!current;
     if (!current) return;
     const d = current.definition;
+    $("rd-title").textContent = current.id == null ? "New rule" : `Edit “${current.name}”`;
     $("rule-name").value = current.name;
     $("rule-mode").value = d.mode;
-    $("delete-rule").hidden = current.id == null;
     const groups = $("groups");
     groups.replaceChildren(...d.groups.map((group, gi) => {
       const box = el("div", {class: "cond-group"});
@@ -232,22 +205,100 @@
     $("actions").replaceChildren(...d.actions.map((_, i) => actionRow(i)));
     $("add-action").hidden = d.actions.length >= Object.keys(schema.actions).length;
     $("rule-dirty").hidden = !dirty;
-    $("editor-error").textContent = "";
+  }
+
+  // ---- the rule list ------------------------------------------------------------
+
+  // A rule in one line: "Path matches /academics/*/facilities → Combine into its parent in the sitemap".
+  function describe(d) {
+    const cond = (c) => {
+      const info = fieldInfo(c.field);
+      const op = (schema.ops[info.type].find((o) => o.op === c.op) || {name: c.op}).name;
+      const value = schema.no_value.includes(c.op) ? "" : ` ${info.type === "choice" ? choiceName(c.field, c.value) : c.value}`;
+      return `${info.name} ${op}${value}`;
+    };
+    const where = d.groups.length ? d.groups.map((g) => g.map(cond).join(" and ")).join("; or ") : "every page";
+    const act = (a) => {
+      const info = schema.actions[a.field];
+      const target = {sitemap_parent: "its sitemap parent", url_parent: "its URL parent", path: `the page at ${a.value}`,
+        blank: "blank", append: `+ “${a.value}”`}[a.kind];
+      if (a.field === "combine_into") return `Combine into ${target}, as the ${schema.combine_as[a.as]}`;
+      const value = a.kind === "field" ? `the ${(schema.conditions[a.value] || {name: a.value}).name}`
+        : target || (info.choices ? choiceName(a.field, a.value) : `“${a.value}”`);
+      return `${info.name} → ${value}`;
+    };
+    return `${d.mode === "exclude" ? "All pages except " : ""}${where} → ${d.actions.map(act).join(", ")}`;
+  }
+
+  let sortable = null;
+  function drawList() {
+    const list = $("rule-list");
+    list.replaceChildren(...library.map((r) => {
+      const box = el("input", {type: "checkbox", "aria-label": `Run “${r.name}”`});
+      box.checked = toRun.has(r.id);
+      box.addEventListener("change", () => { if (box.checked) toRun.add(r.id); else toRun.delete(r.id); rememberRun(); });
+      const name = el("button", {type: "button", class: "link rule-name", text: r.name});
+      name.addEventListener("click", () => openEditor(r));
+      const editBtn = el("button", {type: "button", class: "link", text: "Edit"});
+      editBtn.addEventListener("click", () => openEditor(r));
+      const del = el("button", {type: "button", class: "link", text: "Delete"});
+      del.addEventListener("click", () => deleteRule(r));
+      return el("li", {"data-id": r.id},
+        el("span", {class: "tree-handle", title: "Drag to reorder", "aria-hidden": "true", text: "⠿"}), box,
+        el("div", {class: "rule-text"}, name, el("div", {class: "muted small", text: describe(r.definition)})),
+        el("span", {class: "rule-actions"}, editBtn, del));
+    }));
+    $("rule-list-empty").hidden = library.length > 0;
+    if (sortable) sortable.destroy();
+    sortable = Sortable.create(list, {handle: ".tree-handle", animation: 120, onEnd: async () => {
+      const ids = [...list.children].map((li) => Number(li.dataset.id));
+      library.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+      await send("POST", "/api/rules/order", {ids});
+    }});
+  }
+
+  async function loadLibrary() {
+    const data = await (await fetch("/api/rules")).json();
+    schema = data.schema;
+    library = data.rules;
     drawList();
   }
 
-  function edit(rule) {
-    if (dirty && !window.confirm("Discard the unsaved changes to this rule?")) return;
+  async function deleteRule(rule) {
+    if (!window.confirm(`Delete the rule “${rule.name}” from your account? It's gone from every project.`)) return;
+    await send("DELETE", `/api/rules/${rule.id}`);
+    toRun.delete(rule.id); rememberRun();
+    await loadLibrary();
+    $("run-status").textContent = `Deleted “${rule.name}”.`;
+  }
+
+  // ---- the rule dialog ------------------------------------------------------------
+
+  const ruleDialog = $("rule-dialog");
+
+  function openEditor(rule) {
     current = rule ? JSON.parse(JSON.stringify(rule)) : {
       id: null, name: "", definition: {mode: "include", groups: [[{field: "path", op: "matches", value: ""}]],
         actions: [defaultAction("recommendation")]}};
-    if (!current.definition.groups.length) current.definition.groups = [];
-    dirty = rule == null;
+    dirty = false;
+    $("editor-error").textContent = "";
+    $("rule-results").replaceChildren();
     drawEditor();
-    if (!rule) $("rule-name").focus();
+    ruleDialog.showModal();
+    $("rule-name").focus();
   }
 
-  $("new-rule").addEventListener("click", () => edit(null));
+  function closeEditor() {
+    if (dirty && !window.confirm("Close without saving the changes to this rule?")) return false;
+    ruleDialog.close();
+    current = null;
+    dirty = false;
+    return true;
+  }
+
+  $("new-rule").addEventListener("click", () => openEditor(null));
+  $("rd-close").addEventListener("click", closeEditor);
+  ruleDialog.addEventListener("cancel", (e) => { e.preventDefault(); closeEditor(); });  // Esc
   $("rule-name").addEventListener("input", () => { current.name = $("rule-name").value; markDirty(); });
   $("rule-mode").addEventListener("change", () => { current.definition.mode = $("rule-mode").value; markDirty(); });
   $("add-group").addEventListener("click", () => {
@@ -259,91 +310,105 @@
     if (next) { current.definition.actions.push(defaultAction(next)); markDirty(); drawEditor(); }
   });
 
-  $("save-rule").addEventListener("click", async () => {
+  // Save; returns the saved rule, or null (with the reason shown in the dialog).
+  async function save() {
     const payload = {name: current.name, definition: current.definition};
     const r = current.id == null ? await send("POST", "/api/rules", payload)
       : await send("PUT", `/api/rules/${current.id}`, payload);
-    if (!r.ok) { $("editor-error").textContent = r.data.detail || "Couldn't save the rule."; return; }
+    if (!r.ok) { $("editor-error").textContent = r.data.detail || "Couldn't save the rule."; return null; }
     if (current.id == null) { toRun.add(r.data.id); rememberRun(); }  // a new rule starts ticked
-    current = null;  // saved: close the editor
     dirty = false;
+    closeEditor();
     await loadLibrary();
-    drawEditor();
-    $("run-status").textContent = `Saved “${r.data.name}”.`;
-  });
-
-  $("delete-rule").addEventListener("click", async () => {
-    if (!window.confirm(`Delete the rule “${current.name}” from your account? It's gone from every project.`)) return;
-    await send("DELETE", `/api/rules/${current.id}`);
-    toRun.delete(current.id); rememberRun();
-    current = null; dirty = false;
-    await loadLibrary();
-    drawEditor();
-  });
-
-  // ---- preview and apply ------------------------------------------------------
-
-  // The ticked rules in list order; the one being edited runs as it reads on screen, saved or not.
-  function rulesToRun() {
-    return library.filter((r) => toRun.has(r.id)).map((r) =>
-      current && current.id === r.id ? {name: current.name, definition: current.definition} : {name: r.name, definition: r.definition});
+    return r.data;
   }
 
-  function showResults(results, applied) {
-    const box = $("results");
-    box.hidden = false;
-    box.replaceChildren(el("h2", {text: applied ? "Applied" : "Preview: nothing has changed yet"}),
-      ...results.map((r) => {
-        const head = el("p", {}, el("strong", {text: r.name}),
-          el("span", {class: "muted", text: ` · matches ${r.matched.toLocaleString()} · ${applied ? "changed" : "would change"} ${r.changed.toLocaleString()}`
-            + (r.skipped_count ? ` · skipped ${r.skipped_count}` : "")}));
-        const parts = [head];
-        if (r.undated) {
-          parts.push(el("p", {class: "warn small", text: `${r.undated.toLocaleString()} page${r.undated === 1 ? "" : "s"} matched everything but the date test and were left out because they have no date. Check “Page dates” on the left.`}));
-        }
-        if (r.sample.length) {
-          parts.push(el("table", {class: "plain"}, el("thead", {}, el("tr", {}, el("th", {text: "Page"}), el("th", {text: "Changes"}))),
-            el("tbody", {}, ...r.sample.map((s) => el("tr", {},
-              el("td", {}, el("span", {text: s.label}), el("div", {class: "muted small", text: s.path})),
-              el("td", {text: s.changes.map((c) => `${c.field} → ${c.to}`).join("; ")}))))));
-          if (r.changed > r.sample.length) parts.push(el("p", {class: "muted small", text: `…and ${(r.changed - r.sample.length).toLocaleString()} more.`}));
-        }
-        if (r.skipped.length) {
-          parts.push(el("p", {class: "small", text: "Skipped:"}), el("ul", {class: "small"},
-            ...r.skipped.map((s) => el("li", {text: `${s.label}: ${s.why}`}))));
-        }
-        return el("section", {class: "card result-card"}, ...parts);
-      }));
-    box.scrollIntoView({behavior: "smooth", block: "start"});
+  $("save-rule").addEventListener("click", async () => {
+    const saved = await save();
+    if (saved) $("run-status").textContent = `Saved “${saved.name}”.`;
+  });
+  $("save-apply").addEventListener("click", async () => {
+    const saved = await save();
+    if (saved) apply([{name: saved.name, definition: saved.definition}]);
+  });
+  $("preview-rule").addEventListener("click", async () => {
+    $("editor-error").textContent = "";
+    const r = await send("POST", `/api/p/${slug}/rules/preview`, {rules: [{name: current.name || "This rule", definition: current.definition}]});
+    if (!r.ok) { $("editor-error").textContent = r.data.detail || "Couldn't preview the rule."; return; }
+    showResults($("rule-results"), r.data.rules, false);
+    $("rule-results").scrollIntoView({behavior: "smooth", block: "nearest"});
+  });
+
+  // ---- running ticked rules ---------------------------------------------------------
+
+  const resultsDialog = $("results-dialog");
+  const ticked = () => library.filter((r) => toRun.has(r.id)).map((r) => ({name: r.name, definition: r.definition}));
+
+  function showResults(box, results, applied) {
+    box.replaceChildren(...results.map((r) => {
+      const head = el("p", {}, el("strong", {text: r.name}),
+        el("span", {class: "muted", text: ` · matches ${r.matched.toLocaleString()} · ${applied ? "changed" : "would change"} ${r.changed.toLocaleString()}`
+          + (r.skipped_count ? ` · skipped ${r.skipped_count}` : "")}));
+      const parts = [head];
+      if (r.undated) {
+        const where = el("button", {type: "button", class: "link", text: "Where dates come from…"});
+        where.addEventListener("click", openDates);
+        parts.push(el("p", {class: "warn small"}, document.createTextNode(`${r.undated.toLocaleString()} page${r.undated === 1 ? "" : "s"} `
+          + "matched everything but the date test and were left out because they have no date. "), where));
+      }
+      if (r.sample.length) {
+        parts.push(el("table", {class: "plain"}, el("thead", {}, el("tr", {}, el("th", {text: "Page"}), el("th", {text: "Changes"}))),
+          el("tbody", {}, ...r.sample.map((s) => el("tr", {},
+            el("td", {}, el("span", {text: s.label}), el("div", {class: "muted small", text: s.path})),
+            el("td", {text: s.changes.map((c) => `${c.field} → ${c.to}`).join("; ")}))))));
+        if (r.changed > r.sample.length) parts.push(el("p", {class: "muted small", text: `…and ${(r.changed - r.sample.length).toLocaleString()} more.`}));
+      } else if (!applied) {
+        parts.push(el("p", {class: "muted small", text: "Nothing would change."}));
+      }
+      if (r.skipped.length) {
+        parts.push(el("p", {class: "small", text: "Skipped:"}), el("ul", {class: "small"},
+          ...r.skipped.map((s) => el("li", {text: `${s.label}: ${s.why}`}))));
+      }
+      return el("section", {class: "result-card"}, ...parts);
+    }));
   }
 
-  async function run(which, rules) {
+  async function apply(rules) {
     if (!rules.length) { $("run-status").textContent = "Tick at least one rule to run."; return; }
-    $("run-status").textContent = which === "apply" ? "Applying…" : "Working out what would change…";
-    const r = await send("POST", `/api/p/${slug}/rules/${which}`, {rules});
+    $("run-status").textContent = "Applying…";
+    const r = await send("POST", `/api/p/${slug}/rules/apply`, {rules});
     if (!r.ok) { $("run-status").textContent = r.data.detail || "That didn't work."; return; }
-    showResults(r.data.rules, which === "apply");
-    if (which === "apply") {
-      $("run-status").textContent = `Changed ${r.data.changed.toLocaleString()} page${r.data.changed === 1 ? "" : "s"}.`;
-      if (window.AppHistory) AppHistory.done($("run-status").textContent);
-      loadContext();
-    } else {
-      $("run-status").textContent = "";
-    }
+    const skipped = r.data.rules.reduce((n, x) => n + x.skipped_count, 0);
+    $("run-status").textContent = `Changed ${r.data.changed.toLocaleString()} page${r.data.changed === 1 ? "" : "s"}`
+      + (skipped ? ` (${skipped} skipped: preview to see why).` : ".");
+    if (r.data.changed && window.AppHistory) AppHistory.done($("run-status").textContent);  // nothing changed: nothing to undo
+    loadContext();
   }
 
-  $("preview-checked").addEventListener("click", () => run("preview", rulesToRun()));
-  $("apply-checked").addEventListener("click", () => run("apply", rulesToRun()));
-  $("preview-rule").addEventListener("click", () => run("preview", [{name: current.name || "This rule", definition: current.definition}]));
-  $("apply-rule").addEventListener("click", () => run("apply", [{name: current.name || "Unnamed rule", definition: current.definition}]));
+  $("preview-checked").addEventListener("click", async () => {
+    const rules = ticked();
+    if (!rules.length) { $("run-status").textContent = "Tick at least one rule to preview."; return; }
+    const r = await send("POST", `/api/p/${slug}/rules/preview`, {rules});
+    if (!r.ok) { $("run-status").textContent = r.data.detail || "That didn't work."; return; }
+    $("res-title").textContent = `Preview of ${rules.length} rule${rules.length === 1 ? "" : "s"}: nothing has changed yet`;
+    showResults($("results-body"), r.data.rules, false);
+    resultsDialog.showModal();
+  });
+  $("apply-checked").addEventListener("click", () => apply(ticked()));
+  $("res-apply").addEventListener("click", () => { resultsDialog.close(); apply(ticked()); });
+  $("res-close").addEventListener("click", () => resultsDialog.close());
+  $("res-close-x").addEventListener("click", () => resultsDialog.close());
 
-  // ---- page dates ---------------------------------------------------------------
+  // ---- page dates (a small dialog, opened from date conditions and results) ---------------
 
   let dateSources = [];
   let sourceNames = {};
+  let coverage = null;
   const sourceName = (s) => sourceNames[s] || (s.startsWith("crawl:") ? `Crawl column “${s.slice(6)}”` : s);
+  const coverageText = () => (coverage
+    ? `${coverage.collection_dated.toLocaleString()} of ${coverage.collection_pages.toLocaleString()} news and calendar pages have a date.` : "");
 
-  function drawDates(coverage) {
+  function drawDates() {
     $("date-sources").replaceChildren(...dateSources.map((s, i) => {
       const up = el("button", {type: "button", class: "link", "aria-label": "Try earlier", text: "↑"});
       up.addEventListener("click", () => { [dateSources[i - 1], dateSources[i]] = [dateSources[i], dateSources[i - 1]]; saveDates(); });
@@ -351,19 +416,23 @@
       remove.addEventListener("click", () => { dateSources.splice(i, 1); saveDates(); });
       return el("li", {}, el("span", {text: sourceName(s)}), i > 0 ? up : "", remove);
     }));
-    const add = $("date-add");
     const options = Object.keys(sourceNames).concat(crawlColumns.map((c) => `crawl:${c}`)).filter((s) => !dateSources.includes(s));
-    add.replaceChildren(el("option", {value: "", text: "Choose…"}), ...options.map((s) => el("option", {value: s, text: sourceName(s)})));
+    $("date-add").replaceChildren(el("option", {value: "", text: "Choose…"}), ...options.map((s) => el("option", {value: s, text: sourceName(s)})));
     if (coverage) {
-      const c = coverage;
-      $("date-coverage").textContent = `${c.collection_dated.toLocaleString()} of ${c.collection_pages.toLocaleString()} news and calendar pages have a date `
-        + `(${c.dated.toLocaleString()} of ${c.pages.toLocaleString()} pages in all).`;
+      $("date-coverage").textContent = `${coverageText()} (${coverage.dated.toLocaleString()} of ${coverage.pages.toLocaleString()} pages in all.)`;
     }
   }
 
+  function openDates() {
+    drawDates();
+    $("dates-dialog").showModal();
+  }
+  $("dates-close").addEventListener("click", () => $("dates-dialog").close());
+  $("dates-dialog").addEventListener("close", () => { if (current) drawEditor(); });
+
   async function saveDates() {
     const r = await send("POST", `/api/p/${slug}/dates`, {sources: dateSources});
-    if (r.ok) { dateSources = r.data.date_sources; drawDates(r.data.coverage); }
+    if (r.ok) { dateSources = r.data.date_sources; coverage = r.data.coverage; drawDates(); }
   }
   $("date-add").addEventListener("change", () => { if ($("date-add").value) { dateSources.push($("date-add").value); saveDates(); } });
 
@@ -372,7 +441,7 @@
     crawlColumns = data.crawl_columns;
     dateSources = data.date_sources;
     sourceNames = data.source_names;
-    drawDates(data.coverage);
+    coverage = data.coverage;
   }
 
   window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
@@ -380,6 +449,5 @@
 
   (async () => {
     await Promise.all([loadLibrary(), loadContext()]);
-    drawEditor();
   })();
 })();
