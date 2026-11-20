@@ -242,13 +242,12 @@
     const r = current.id == null ? await send("POST", "/api/rules", payload)
       : await send("PUT", `/api/rules/${current.id}`, payload);
     if (!r.ok) { $("editor-error").textContent = r.data.detail || "Couldn't save the rule."; return; }
-    const isNew = current.id == null;
-    current = r.data;
+    if (current.id == null) { toRun.add(r.data.id); rememberRun(); }  // a new rule starts ticked
+    current = null;  // saved: close the editor
     dirty = false;
-    if (isNew) { toRun.add(current.id); rememberRun(); }
     await loadLibrary();
     drawEditor();
-    $("run-status").textContent = `Saved “${current.name}”.`;
+    $("run-status").textContent = `Saved “${r.data.name}”.`;
   });
 
   $("delete-rule").addEventListener("click", async () => {
