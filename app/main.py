@@ -441,16 +441,19 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
 
     # ---- pages grid --------------------------------------------------------
 
-    def row_dict(row, planned: Optional[Dict[int, str]] = None) -> dict:
+    def row_dict(row, planned: Optional[Dict[int, str]] = None, when: Optional[dict] = None) -> dict:
         d = dict(row)
         d["content_targets"] = json.loads(d["content_targets"] or "[]")
         if planned is not None:
             d["planned_url"] = planned.get(d["id"], "")
+        if when is not None:
+            found = when.get(d["id"])
+            d["date"], d["date_source"] = (found.text, found.source) if found else ("", "")
         return d
 
     def one(conn, page_id: int) -> dict:
-        """A grid row, with its planned URL."""
-        return row_dict(grid.one_row(conn, page_id), urls.planned(conn))
+        """A grid row, with its planned URL and date."""
+        return row_dict(grid.one_row(conn, page_id), urls.planned(conn), dates.all_dates(conn))
 
     @app.get("/p/{slug}/pages", response_class=HTMLResponse)
     def pages_view(request: Request, slug: str):
@@ -470,8 +473,9 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
                                          grid.bracket_params(items, "sort"), view, max(1, page), size)
             problem_count = len(rules.problems(conn))
             planned = urls.planned(conn)
+            when = dates.all_dates(conn)
         return {"last_page": max(1, -(-total // size)), "last_row": total, "problem_count": problem_count,
-                "data": [row_dict(r, planned) for r in rows]}
+                "data": [row_dict(r, planned, when) for r in rows]}
 
     @app.patch("/api/p/{slug}/pages/{page_id}")
     def edit_page(request: Request, slug: str, page_id: int, edit: Edit):

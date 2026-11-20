@@ -396,3 +396,4 @@ button.toast-undo { padding: 3px 12px !important; background: transparent !impor
 .rules-results h2 { margin: 0; }
 .result-card { margin: 0; }
 .result-card table { margin-top: 6px; }
+.by-rule { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }

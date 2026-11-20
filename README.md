@@ -27,6 +27,14 @@ Each client project is its own SQLite file. The tabs follow the workflow:
   sits in the new sitemap, and editable decision fields; ↑/↓ (or J/K) step through rows.
   **Planning** fields (owner, writer, priority, suggested content, and a **New URL**) are in the panel
   and in optional grid columns; the "New pages" view gathers pages that aren't on the current site.
+- **Rules:** if-then bulk updates, built like Data Studio filters: include (or exclude) pages where
+  conditions match (all in a group; any group), then set fields to a value, another field, blank, or a
+  page (its sitemap parent, its URL parent, or the page at a path). Path patterns use `*` for one folder
+  and `**` for any depth. Rules are saved to your account and reused across projects; preview shows what
+  each would change, and applying is one undoable step. Values a rule set say which rule, until edited
+  by hand. Date tests use each page's date from sources chosen per project: a date or year in the URL
+  (including 8-digit dates like `fri-01062023`), any crawl column such as a custom extraction of the
+  publish date, or Last Modified.
 - **Sitemap:** every kept page, nested as it will be in the new site, as a list or a **map** (top
   three levels as columns, with a page count under each). Drag to reorder and re-nest, add new pages,
   double-click a name to rename it, and click a page-type tag to change it. New pages get a planned URL

@@ -130,8 +130,9 @@
   // ---- grid ------------------------------------------------------------------
 
   const choices = [""].concat(DISPOSITIONS);
+  const DATE_SOURCES = {url_date: "a date in the URL", url_year: "a year in the URL", last_modified: "Last Modified"};
   const PRIORITY_CHOICES = {"": "(none)", high: "high", medium: "medium", low: "low"};
-  const PLANNING = ["new_url", "owner", "writer", "priority", "suggested_content"];
+  const PLANNING = ["new_url", "owner", "writer", "priority", "suggested_content", "date"];  // hidden until turned on
   const TYPE_CHOICES = {"": "Auto", landing: "Landing", listing: "Listing", list: "List", article: "Article", form: "Form"};
   const filterChoices = {"": "", "(blank)": "(blank)"};
   DISPOSITIONS.forEach((c) => { filterChoices[c] = c; });
@@ -222,6 +223,13 @@
          if (typed) return document.createTextNode(typed);
          const d = cell.getData();
          return d.is_new ? el("span", {class: "muted", text: `${d.planned_url} (from sitemap)`}) : "";
+       }},
+      {title: "Date", field: "date", width: 110, headerSort: false,
+       headerTooltip: "The page's date for rules, from the sources chosen on the Rules tab",
+       formatter: (cell) => {
+         const d = cell.getData();
+         return d.date ? el("span", {title: `From ${DATE_SOURCES[d.date_source] || d.date_source.replace(/^crawl:/, "crawl column ")}`, text: d.date})
+           : el("span", {class: "muted", text: "—"});
        }},
       {title: "Owner", field: "owner", formatter: "plaintext", editor: "input", headerFilter: "input", width: 120},
       {title: "Writer", field: "writer", formatter: "plaintext", editor: "input", headerFilter: "input", width: 120},
@@ -579,12 +587,16 @@
 
     // Decision: every value is edited right where it shows.
     const row = rowFor(d);
+    // A value a rule set says so, until it's changed by hand.
+    const byRule = (field, control) => d.rule_marks[field]
+      ? el("span", {class: "by-rule"}, control, el("span", {class: "muted small", title: "Set by a rule on the Rules tab", text: `rule: ${d.rule_marks[field]}`}))
+      : control;
     const edit = (field, value, options) => {
       const select = el("select", {"aria-label": FIELD_TITLES[field]});
       Object.entries(options).forEach(([v, text]) => select.append(el("option", {value: v, text})));
       select.value = value || "";
       select.addEventListener("change", () => changeField(row, field, select.value || null, select, value || ""));
-      return select;
+      return byRule(field, select);
     };
     const dispOptions = Object.fromEntries(choices.map((c) => [c, c || "—"]));
     const autoType = d.sitemap ? `Auto (${TYPE_CHOICES[d.sitemap.type]})` : "Auto";
@@ -600,9 +612,9 @@
       ["Final Decision", edit("decision", d.decision, dispOptions)],
     ];
     if (d.redirect_label || ["combine", "split", "delete"].includes(disp)) {
-      pairs.push(["Redirect to", d.redirect_label
+      pairs.push(["Redirect to", byRule("redirect_to", d.redirect_label
         ? targetButton(`${d.redirect_label} ${d.redirect_path || "(new page)"} ✎`, "Change where this page redirects")
-        : targetButton(disp === "delete" ? "None: the old URL will 404. Choose… ✎" : "Choose… ✎", "Choose the page to redirect to"),
+        : targetButton(disp === "delete" ? "None: the old URL will 404. Choose… ✎" : "Choose… ✎", "Choose the page to redirect to")),
       !d.redirect_label && NEEDS_TARGET.includes(disp) ? "warn-text" : ""]);
     }
     if (disp === "split" || d.content_targets.length) {
@@ -619,7 +631,7 @@
         ? {rows: "3"} : {type: "text", maxlength: attrs.max || "100"}, attrs.placeholder ? {placeholder: attrs.placeholder} : {}));
       input.value = value || "";
       input.addEventListener("change", () => changeField(row, field, input.value.trim() || null, input, value || ""));
-      return input;
+      return byRule(field, input);
     };
     const urlHint = d.is_new ? `${d.planned_url} (from the sitemap)` : `${d.url_path || ""} (unchanged)`;
     parts.push(section("Planning", facts([
