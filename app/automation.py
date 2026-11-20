@@ -62,10 +62,13 @@ OPS: Dict[str, List[Tuple[str, str]]] = {
 OPS[PATH] = [("matches", "matches pattern"), ("not_matches", "doesn't match pattern")] + OPS[TEXT]
 NO_VALUE = {"is_empty", "not_empty", "is_true", "is_false"}
 
-# field -> (name shown, type); "page" fields take a page as their value.
-PAGE = "page"
+# field -> (name shown, type); "page" fields take a page as their value. "Combine into" is the one
+# way to merge pages: it sets the Recommendation or Final Decision to combine and the page to merge
+# into, together, so a combine can't be set up half-way.
+PAGE, COMBINE = "page", "combine"
 ACTION_FIELDS: Dict[str, Tuple[str, str]] = {
     "recommendation": ("Recommendation", CHOICE), "decision": ("Final Decision", CHOICE),
+    "combine_into": ("Combine into", COMBINE),
     "redirect_to": ("Redirect to", PAGE), "parent_id": ("Parent (move under)", PAGE),
     "status": ("Status", CHOICE), "page_type": ("Page type", CHOICE), "priority": ("Priority", CHOICE),
     "owner": ("Owner", TEXT), "writer": ("Writer", TEXT), "notes": ("Notes", TEXT),
@@ -79,6 +82,11 @@ KINDS = {
     "path": "the page at a path",
 }
 PAGE_KINDS = {"sitemap_parent", "url_parent", "path", "blank"}
+COMBINE_KINDS = ("sitemap_parent", "url_parent", "path")
+COMBINE_AS = {"recommendation": "Recommendation", "decision": "Final Decision"}
+# Combine and split aren't plain values in rules: combine goes through "Combine into"; split needs
+# two or more pages for its content, which is set in the grid.
+ACTION_CHOICES = {**CHOICES, "recommendation": ["keep", "delete", "review"], "decision": ["keep", "delete", "review"]}
 COPY_FROM = {  # target field -> fields it can copy from
     "recommendation": ["decision"], "decision": ["recommendation"],
     **{f: ["label", "title", "h1", "owner", "writer", "collection", "parent", "section"]
@@ -98,8 +106,9 @@ def schema() -> dict:
         "conditions": {k: {"name": n, "type": t, "choices": CHOICES.get(k)} for k, (n, t) in CONDITION_FIELDS.items()},
         "ops": {t: [{"op": o, "name": n} for o, n in ops] for t, ops in OPS.items()},
         "no_value": sorted(NO_VALUE),
-        "actions": {k: {"name": n, "type": t, "choices": CHOICES.get(k), "copy_from": COPY_FROM.get(k, []),
+        "actions": {k: {"name": n, "type": t, "choices": ACTION_CHOICES.get(k), "copy_from": COPY_FROM.get(k, []),
                         "append": k in APPENDABLE} for k, (n, t) in ACTION_FIELDS.items()},
+        "combine_as": COMBINE_AS,
         "kinds": KINDS, "type_names": TYPE_NAMES,
     }
 
@@ -157,6 +166,25 @@ def _clean_action(a: Any) -> dict:
     if name not in ACTION_FIELDS:
         raise RuleDefinitionError(f"Rules can't set {name}.")
     title, ftype = ACTION_FIELDS[name]
+    if ftype == COMBINE:
+        if kind not in COMBINE_KINDS:
+            raise RuleDefinitionError("Combine into its parent in the sitemap, its parent in the URL, or the page at a path.")
+        target_as = a.get("as", "recommendation")
+        if target_as not in COMBINE_AS:
+            raise RuleDefinitionError("Combine sets the Recommendation or the Final Decision.")
+        out = {"field": name, "kind": kind, "as": target_as}
+        if kind == "path":
+            try:
+                out["value"] = rules.clean_url(a.get("value"))
+            except rules.RuleError as e:
+                raise RuleDefinitionError(str(e))
+            if not out["value"]:
+                raise RuleDefinitionError("Give the path of the page to combine into.")
+        return out
+    if name in ("recommendation", "decision") and kind == "value" and a.get("value") in ("combine", "split"):
+        if a.get("value") == "split":
+            raise RuleDefinitionError("Rules can't split pages (a split needs two or more pages for its content); set it in the grid.")
+        raise RuleDefinitionError("To combine pages, use “Combine into”: it also sets the page to merge into.")
     if ftype == PAGE:
         if kind not in PAGE_KINDS:
             raise RuleDefinitionError(f"{title} is set to a page: its sitemap parent, its URL parent, or a path.")
@@ -213,10 +241,28 @@ def clean_definition(d: Any) -> dict:
         raise RuleDefinitionError("Add at least one thing for the rule to set.")
     if len(actions) > MAX_ACTIONS:
         raise RuleDefinitionError(f"Up to {MAX_ACTIONS} actions in a rule.")
-    clean_actions = [_clean_action(a) for a in actions]
-    if len({a["field"] for a in clean_actions}) != len(clean_actions):
-        raise RuleDefinitionError("Each field can be set once per rule.")
+    clean_actions = [_clean_action(a) for a in _combine_old_style(actions)]
+    fields = [f for a in clean_actions for f in _sets(a)]
+    if len(set(fields)) != len(fields):
+        raise RuleDefinitionError("Each field can be set once per rule (“Combine into” sets the Recommendation or "
+                                  "Final Decision and Redirect to).")
     return {"mode": mode, "groups": clean_groups, "actions": clean_actions}
+
+
+def _sets(action: dict) -> List[str]:
+    return [action["as"], "redirect_to"] if action["field"] == "combine_into" else [action["field"]]
+
+
+def _combine_old_style(actions: list) -> list:
+    """Rules saved before "Combine into" existed (combine + Redirect to, as two actions) become one."""
+    combine = next((a for a in actions if isinstance(a, dict) and a.get("field") in COMBINE_AS
+                    and a.get("kind", "value") == "value" and a.get("value") == "combine"), None)
+    target = next((a for a in actions if isinstance(a, dict) and a.get("field") == "redirect_to"
+                   and a.get("kind") in COMBINE_KINDS), None)
+    if not combine or not target:
+        return actions
+    merged = {"field": "combine_into", "kind": target["kind"], "value": target.get("value"), "as": combine["field"]}
+    return [merged if a is combine else a for a in actions if a is not target]
 
 
 # ---- the pages as rules see them -------------------------------------------------
@@ -393,16 +439,22 @@ def plan(pages: Pages, name: str, definition: dict) -> Outcome:
         row, changes = pages.rows[page_id], {}
         try:
             for action in definition["actions"]:
-                value = _value_for(pages, page_id, action)
-                if action["kind"] == "field" or action["kind"] == "blank":
-                    value = rules._clean({action["field"]: value}, set(ACTION_FIELDS))[action["field"]]
-                if action["field"] == "redirect_to" and value == page_id:
-                    raise ValueError("it would redirect to itself")
-                if action["field"] == "parent_id" and value == page_id:
-                    raise ValueError("it would go under itself")
-                current = row.get(action["field"])
-                if (current if current is not None else "") != (value if value is not None else ""):
-                    changes[action["field"]] = value
+                if action["field"] == "combine_into":
+                    target = _value_for(pages, page_id, {**action, "field": "redirect_to"})
+                    sets = [(action["as"], "combine"), ("redirect_to", target)]
+                else:
+                    value = _value_for(pages, page_id, action)
+                    if action["kind"] == "field" or action["kind"] == "blank":
+                        value = rules._clean({action["field"]: value}, set(ACTION_FIELDS))[action["field"]]
+                    sets = [(action["field"], value)]
+                for name, value in sets:
+                    if name == "redirect_to" and value == page_id:
+                        raise ValueError("it would redirect to itself")
+                    if name == "parent_id" and value == page_id:
+                        raise ValueError("it would go under itself")
+                    current = row.get(name)
+                    if (current if current is not None else "") != (value if value is not None else ""):
+                        changes[name] = value
         except (ValueError, rules.RuleError) as e:
             out.skipped.append((page_id, str(e)))
             continue

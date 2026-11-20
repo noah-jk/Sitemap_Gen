@@ -28,8 +28,9 @@ Each client project is its own SQLite file. The tabs follow the workflow:
   **Planning** fields (owner, writer, priority, suggested content, and a **New URL**) are in the panel
   and in optional grid columns; the "New pages" view gathers pages that aren't on the current site.
 - **Rules:** if-then bulk updates, built like Data Studio filters: include (or exclude) pages where
-  conditions match (all in a group; any group), then set fields to a value, another field, blank, or a
-  page (its sitemap parent, its URL parent, or the page at a path). Path patterns use `*` for one folder
+  conditions match (all in a group; any group), then set fields (to a value, another field's value, or
+  blank) or **Combine into** a page (its sitemap parent, its URL parent, or the page at a path), which
+  sets the combine and the page to merge into together. Path patterns use `*` for one folder
   and `**` for any depth. Rules are saved to your account and reused across projects; preview shows what
   each would change, and applying is one undoable step. Values a rule set say which rule, until edited
   by hand. Date tests use each page's date from sources chosen per project: a date or year in the URL

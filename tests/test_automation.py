@@ -147,3 +147,32 @@ def test_report_and_appending_notes(conn):
     assert rep["changed"] == len(outcomes[0].changed) > 0 and rep["sample"][0]["changes"][0]["field"] == "Notes"
     again = auto.run(conn, [("No traffic", note)], write=True)[0]
     assert again.changed == {}   # the line is already there, so nothing is added twice
+
+
+def test_combine_into_is_the_one_way_to_merge(conn):
+    merge = rule([[cond("path", "matches", "/admissions/*")]],
+                 [{"field": "combine_into", "kind": "sitemap_parent", "as": "decision"}])
+    assert merge["actions"] == [{"field": "combine_into", "kind": "sitemap_parent", "as": "decision"}]
+    auto.run(conn, [("Merge", merge)], write=True)
+    adm = pid(conn, "/admissions")
+    assert page(conn, "/admissions/contact", "recommendation", "decision", "redirect_to") == (None, "combine", adm)
+    marks = {r[0] for r in conn.execute("SELECT field FROM rule_marks WHERE page_id = ?", (pid(conn, "/admissions/contact"),))}
+    assert marks == {"decision", "redirect_to"}
+    # Combine as a plain value is pointed at "Combine into"; split isn't something rules do.
+    with pytest.raises(auto.RuleDefinitionError, match="Combine into"):
+        rule([], [{"field": "recommendation", "kind": "value", "value": "combine"}])
+    with pytest.raises(auto.RuleDefinitionError, match="split"):
+        rule([], [{"field": "decision", "kind": "value", "value": "split"}])
+    with pytest.raises(auto.RuleDefinitionError, match="once per rule"):
+        rule([], [{"field": "combine_into", "kind": "url_parent"}, {"field": "redirect_to", "kind": "path", "value": "/x"}])
+    with pytest.raises(auto.RuleDefinitionError, match="path of the page"):
+        rule([], [{"field": "combine_into", "kind": "path", "value": ""}])
+
+
+def test_rules_saved_the_old_way_become_combine_into(conn):
+    old = rule([[cond("path", "is", "/campus-life")]],
+               [{"field": "recommendation", "kind": "value", "value": "combine"},
+                {"field": "status", "kind": "value", "value": "done"},
+                {"field": "redirect_to", "kind": "path", "value": "/admissions"}])
+    assert old["actions"] == [{"field": "combine_into", "kind": "path", "as": "recommendation", "value": "/admissions"},
+                              {"field": "status", "kind": "value", "value": "done"}]

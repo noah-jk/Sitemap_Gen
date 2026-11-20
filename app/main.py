@@ -754,8 +754,13 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
         with closing(store.registry()) as reg:
             rows = reg.execute("SELECT id, name, definition FROM rules WHERE user_id = ? ORDER BY sort_order, id",
                                (uid,)).fetchall()
-        return {"rules": [{"id": r["id"], "name": r["name"], "definition": json.loads(r["definition"])} for r in rows],
-                "schema": automation.schema()}
+        def current_form(definition: dict) -> dict:  # rules saved before a change in the builder, updated
+            try:
+                return automation.clean_definition(definition)
+            except automation.RuleDefinitionError:
+                return definition
+        return {"rules": [{"id": r["id"], "name": r["name"], "definition": current_form(json.loads(r["definition"]))}
+                          for r in rows], "schema": automation.schema()}
 
     @app.post("/api/rules")
     def rules_create(request: Request, rule: RuleIn):

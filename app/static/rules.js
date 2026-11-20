@@ -139,47 +139,69 @@
     return el("div", {class: "cond-row"}, fieldSel, opSel, valueEl, remove, hint);
   }
 
+  // One action, as one sentence: the field, then one dropdown for what it becomes (values first, then
+  // "the value of another field" and "blank"), plus a text box when it needs one.
   function actionRow(index) {
     const actions = current.definition.actions;
     const a = actions[index];
     const info = schema.actions[a.field];
-    const taken = new Set(actions.map((x) => x.field));
-    const fieldSel = select(Object.entries(schema.actions).filter(([k]) => k === a.field || !taken.has(k))
-      .map(([k, v]) => [k, v.name]), a.field, "Field to set");
-    fieldSel.addEventListener("change", () => {
-      actions[index] = defaultAction(fieldSel.value);
-      markDirty(); drawEditor();
-    });
-    const kinds = info.type === "page" ? ["sitemap_parent", "url_parent", "path", "blank"]
-      : ["value"].concat(info.copy_from.length ? ["field"] : [], info.append ? ["append"] : [], ["blank"]);
-    const kindSel = select(kinds.map((k) => [k, schema.kinds[k]]), a.kind, "Set to");
-    kindSel.addEventListener("change", () => {
-      a.kind = kindSel.value;
-      a.value = a.kind === "field" ? info.copy_from[0] : a.kind === "value" && info.choices ? info.choices[0] : "";
-      markDirty(); drawEditor();
-    });
-    let valueEl = el("span");
-    if (a.kind === "value" && info.choices) {
-      valueEl = select(info.choices.map((v) => [v, choiceName(a.field, v)]), a.value || info.choices[0], "Value");
-      a.value = valueEl.value;
-    } else if (a.kind === "field") {
-      valueEl = select(info.copy_from.map((f) => [f, (schema.conditions[f] || {name: f}).name]), a.value, "Copy from");
-      a.value = valueEl.value;
-    } else if (["value", "append", "path"].includes(a.kind)) {
-      valueEl = el("input", {type: "text", "aria-label": "Value",
-        placeholder: a.kind === "path" ? "/admissions" : a.kind === "append" ? "Line to add" : ""});
-      valueEl.value = a.value ?? "";
-    }
-    const update = () => { a.value = valueEl.value; markDirty(); };
-    valueEl.addEventListener("input", update);
-    valueEl.addEventListener("change", update);
+    const sets = (x) => (x.field === "combine_into" ? [x.as || "recommendation", "redirect_to"] : [x.field]);
+    const taken = new Set(actions.filter((x) => x !== a).flatMap(sets));
+    const free = (k) => (k === "combine_into" ? !taken.has("redirect_to") : !taken.has(k));
+    const fieldSel = select(Object.entries(schema.actions).filter(([k]) => k === a.field || free(k))
+      .map(([k, v]) => [k, v.name]), a.field, "What to set");
+    fieldSel.addEventListener("change", () => { actions[index] = defaultAction(fieldSel.value); markDirty(); drawEditor(); });
     const remove = el("button", {type: "button", class: "link", "aria-label": "Remove this action", text: "✕"});
     remove.addEventListener("click", () => { actions.splice(index, 1); markDirty(); drawEditor(); });
-    return el("div", {class: "cond-row"}, fieldSel, el("span", {class: "muted", text: "to"}), kindSel, valueEl, remove);
+
+    const pageOptions = [["sitemap_parent|", schema.kinds.sitemap_parent], ["url_parent|", schema.kinds.url_parent],
+      ["path|", "the page at a path…"]];
+    let options;
+    if (info.type === "combine") options = pageOptions;
+    else if (info.type === "page") options = pageOptions.concat([["blank|", "blank"]]);
+    else if (info.choices) {
+      options = info.choices.map((v) => [`value|${v}`, choiceName(a.field, v)])
+        .concat(info.copy_from.map((f) => [`field|${f}`, `the value of ${(schema.conditions[f] || {name: f}).name}`]), [["blank|", "blank"]]);
+    } else {
+      options = [["value|", "this text…"]].concat(info.append ? [["append|", "itself plus this line…"]] : [],
+        info.copy_from.map((f) => [`field|${f}`, `the value of ${(schema.conditions[f] || {name: f}).name}`]), [["blank|", "blank"]]);
+    }
+    const encode = () => (a.kind === "value" && info.choices ? `value|${a.value}` : a.kind === "field" ? `field|${a.value}` : `${a.kind}|`);
+    const toSel = select(options, encode(), info.type === "combine" ? "Page to combine into" : "Set to");
+    if (toSel.value !== encode()) { toSel.selectedIndex = 0; }
+    const [k0, v0] = toSel.value.split("|");
+    a.kind = k0;
+    if (k0 === "value" && info.choices) a.value = v0;
+    if (k0 === "field") a.value = v0;
+    toSel.addEventListener("change", () => {
+      const [k, v] = toSel.value.split("|");
+      a.kind = k;
+      a.value = (k === "value" && info.choices) || k === "field" ? v : "";
+      markDirty(); drawEditor();
+    });
+
+    const parts = [fieldSel, el("span", {class: "muted", text: info.type === "combine" ? "" : "→"}), toSel];
+    if ((a.kind === "value" && !info.choices) || a.kind === "append" || a.kind === "path") {
+      const input = el("input", {type: "text", "aria-label": "Value",
+        placeholder: a.kind === "path" ? "/admissions" : a.kind === "append" ? "Line to add" : ""});
+      input.value = a.value ?? "";
+      const update = () => { a.value = input.value; markDirty(); };
+      input.addEventListener("input", update);
+      input.addEventListener("change", update);
+      parts.push(input);
+    }
+    if (info.type === "combine") {
+      const asSel = select(Object.entries(schema.combine_as), a.as || "recommendation", "Set as");
+      asSel.addEventListener("change", () => { a.as = asSel.value; markDirty(); drawEditor(); });
+      parts.push(el("span", {class: "muted", text: "as the"}), asSel);
+    }
+    parts.push(remove);
+    return el("div", {class: "cond-row"}, ...parts);
   }
 
   function defaultAction(field) {
     const info = schema.actions[field];
+    if (info.type === "combine") return {field, kind: "sitemap_parent", as: "recommendation"};
     if (info.type === "page") return {field, kind: "sitemap_parent"};
     return {field, kind: "value", value: info.choices ? info.choices[0] : ""};
   }
@@ -200,7 +222,7 @@
         box.append(conditionRow(group, ci));
       });
       const and = el("button", {type: "button", class: "link", text: "+ and…"});
-      and.addEventListener("click", () => { group.push({field: "path", op: "starts_with", value: ""}); markDirty(); drawEditor(); });
+      and.addEventListener("click", () => { group.push({field: "path", op: "matches", value: ""}); markDirty(); drawEditor(); });
       const dropGroup = el("button", {type: "button", class: "link", text: "Remove group"});
       dropGroup.addEventListener("click", () => { d.groups.splice(gi, 1); markDirty(); drawEditor(); });
       box.append(el("div", {class: "row"}, and, d.groups.length > 1 ? dropGroup : ""));
@@ -217,7 +239,7 @@
   function edit(rule) {
     if (dirty && !window.confirm("Discard the unsaved changes to this rule?")) return;
     current = rule ? JSON.parse(JSON.stringify(rule)) : {
-      id: null, name: "", definition: {mode: "include", groups: [[{field: "path", op: "starts_with", value: ""}]],
+      id: null, name: "", definition: {mode: "include", groups: [[{field: "path", op: "matches", value: ""}]],
         actions: [defaultAction("recommendation")]}};
     if (!current.definition.groups.length) current.definition.groups = [];
     dirty = rule == null;
@@ -229,11 +251,11 @@
   $("rule-name").addEventListener("input", () => { current.name = $("rule-name").value; markDirty(); });
   $("rule-mode").addEventListener("change", () => { current.definition.mode = $("rule-mode").value; markDirty(); });
   $("add-group").addEventListener("click", () => {
-    current.definition.groups.push([{field: "path", op: "starts_with", value: ""}]); markDirty(); drawEditor();
+    current.definition.groups.push([{field: "path", op: "matches", value: ""}]); markDirty(); drawEditor();
   });
   $("add-action").addEventListener("click", () => {
-    const taken = new Set(current.definition.actions.map((a) => a.field));
-    const next = Object.keys(schema.actions).find((k) => !taken.has(k));
+    const taken = new Set(current.definition.actions.flatMap((a) => (a.field === "combine_into" ? [a.as, "redirect_to", a.field] : [a.field])));
+    const next = Object.keys(schema.actions).find((k) => !taken.has(k) && k !== "combine_into");
     if (next) { current.definition.actions.push(defaultAction(next)); markDirty(); drawEditor(); }
   });
 
@@ -313,6 +335,7 @@
   $("preview-checked").addEventListener("click", () => run("preview", rulesToRun()));
   $("apply-checked").addEventListener("click", () => run("apply", rulesToRun()));
   $("preview-rule").addEventListener("click", () => run("preview", [{name: current.name || "This rule", definition: current.definition}]));
+  $("apply-rule").addEventListener("click", () => run("apply", [{name: current.name || "Unnamed rule", definition: current.definition}]));
 
   // ---- page dates ---------------------------------------------------------------
 
