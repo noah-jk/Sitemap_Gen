@@ -165,6 +165,12 @@ def check_parent(conn, page_ids: List[int], parent: Optional[int]) -> None:
         raise RuleError(["A page can't go under itself or one of its own sub-pages."])
 
 
+def clear_marks(conn, page_ids: List[int], fields) -> None:
+    """A person changed these values, so they're no longer a rule's doing."""
+    conn.execute("DELETE FROM rule_marks WHERE page_id IN (SELECT value FROM json_each(?)) "
+                 "AND field IN (SELECT value FROM json_each(?))", (json.dumps(list(page_ids)), json.dumps(list(fields))))
+
+
 def dependents(conn, page_id: int) -> int:
     """Pages that point at this one (as redirect or content target)."""
     return conn.execute(
@@ -194,6 +200,7 @@ def apply_changes(conn: sqlite3.Connection, page_id: int, changes: dict, updated
         scalars = {k: v for k, v in changes.items() if k in SCALAR_FIELDS}
         sets = "".join(f"{k} = ?, " for k in scalars)
         conn.execute(f"UPDATE pages SET {sets}updated_at = ? WHERE id = ?", [*scalars.values(), now_ms(), page_id])
+        clear_marks(conn, [page_id], changes)
         if "content_targets" in changes:
             conn.execute("DELETE FROM page_content_targets WHERE page_id = ?", (page_id,))
             conn.executemany("INSERT INTO page_content_targets(page_id, target_id) VALUES (?, ?)",
@@ -238,6 +245,7 @@ def bulk_apply(conn: sqlite3.Connection, ids: List[int], changes: dict) -> Tuple
         sets = "".join(f"{k} = ?, " for k in changes)
         cur = conn.execute(f"UPDATE pages SET {sets}updated_at = ? WHERE id IN (SELECT value FROM json_each(?))",
                            [*changes.values(), now_ms(), json.dumps(ids)])
+        clear_marks(conn, ids, changes)
         found = problems(conn, ids)
         if found:
             labels = _labels(conn, found)
