@@ -29,6 +29,19 @@ REGISTRY_MIGRATIONS: List[str] = [
     """
     ALTER TABLE users ADD COLUMN password_changed_at INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    -- If-then rules belong to a person, not a project, so they can be reused across clients.
+    CREATE TABLE rules(
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      definition TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX rules_user ON rules(user_id, sort_order);
+    """,
 ]
 
 PROJECT_MIGRATIONS: List[str] = [
@@ -187,6 +200,19 @@ PROJECT_MIGRATIONS: List[str] = [
     ALTER TABLE pages ADD COLUMN writer TEXT NOT NULL DEFAULT '';
     ALTER TABLE pages ADD COLUMN priority TEXT NOT NULL DEFAULT '' CHECK(priority IN ('', 'high', 'medium', 'low'));
     ALTER TABLE pages ADD COLUMN suggested_content TEXT NOT NULL DEFAULT '';
+    """,
+    """
+    -- Rules: the Last Modified header from the crawl, where each page's date comes from, and which
+    -- rule last set each value (cleared when a person changes that value).
+    ALTER TABLE pages ADD COLUMN last_modified TEXT NOT NULL DEFAULT '';
+    ALTER TABLE settings ADD COLUMN date_sources TEXT NOT NULL DEFAULT '["url_date","url_year"]';
+    CREATE TABLE rule_marks(
+      page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+      field TEXT NOT NULL,
+      rule_name TEXT NOT NULL,
+      applied_at INTEGER NOT NULL,
+      PRIMARY KEY(page_id, field)
+    );
     """,
 ]
 

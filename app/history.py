@@ -24,6 +24,7 @@ TRACKED: Dict[str, Tuple[Tuple[str, ...], frozenset]] = {
     "page_content_targets": (("page_id", "target_id"), frozenset()),
     "nav_items": (("id",), frozenset({"updated_at"})),
     "settings": (("id",), frozenset({"canonical_host", "title_suffix"})),
+    "rule_marks": (("page_id", "field"), frozenset()),
 }
 STAMPED = {"pages", "nav_items"}  # tables with updated_at, bumped when undo or redo touches a row
 

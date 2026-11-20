@@ -58,7 +58,7 @@ MALFORMED_DETAIL = {
 UPDATABLE = ["current_url", "title", "h1", "meta_description", "canonical", "status_code", "crawl_depth",
              "inlinks", "unique_inlinks", "pct_of_total", "hash", "indexability", "word_count",
              "near_duplicates", "closest_near_duplicate", "in_current_nav", "sessions", "views",
-             "engaged_sessions", "engagement_rate", "key_events", "variants", "crawl_extra"]
+             "engaged_sessions", "engagement_rate", "key_events", "variants", "crawl_extra", "last_modified"]
 
 
 @dataclass
@@ -277,6 +277,7 @@ def _write_groups(conn, groups, canonical, s: Summary, import_id: int, header: L
             "status_code": _int(best["Status Code"]),
             "variants": json.dumps(sorted(r["Address"] for r in rows)),
             "crawl_extra": json.dumps({h: best[h] for h in extra_cols if best.get(h, "").strip()}),
+            "last_modified": (best.get("Last Modified") or "").strip()[:100],
             **{col: _coerce(col, best.get(sf, "")) for sf, col in CRAWL_COLUMNS.items()},
             **ga,
         }
