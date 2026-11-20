@@ -370,3 +370,29 @@ button.toast-undo { padding: 3px 12px !important; background: transparent !impor
 .dt-field textarea { width: 100%; resize: vertical; font: inherit; }
 #bulk-text { width: 180px; }
 .results li button.create-page { border-style: dashed; color: var(--accent); }
+
+/* Rules tab */
+.rules-layout { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .rules-layout { grid-template-columns: 1fr; } }
+.rules-side { display: flex; flex-direction: column; gap: 16px; }
+.rules-side .card, .rules-editor { margin: 0; }
+.rule-list { list-style: none; margin: 8px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rule-list li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.rule-list li.current { background: var(--paper); box-shadow: inset 3px 0 0 var(--accent); }
+.rule-list .rule-name { text-align: left; flex: 1; text-decoration: none; color: var(--ink); }
+.rule-list .rule-name:hover { text-decoration: underline; }
+.editor-head .grow { flex: 1; }
+.editor-head input { width: 100%; }
+.rule-sentence { display: flex; align-items: center; gap: 8px; margin: 12px 0 8px; font-weight: 600; }
+.cond-group { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.cond-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cond-row input[type=text], .cond-row input[type=number], .cond-row input[type=date] { min-width: 220px; padding: 5px 8px; }
+.joiner { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.joiner.or { margin: 8px 0; color: var(--accent); }
+#actions { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.date-sources { margin: 6px 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.date-sources li span { margin-right: 6px; }
+.rules-results { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+.rules-results h2 { margin: 0; }
+.result-card { margin: 0; }
+.result-card table { margin-top: 6px; }

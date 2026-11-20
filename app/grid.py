@@ -152,6 +152,8 @@ def page_detail(conn, page_id: int) -> Optional[dict]:
         f" ORDER BY p.label", (page_id, page_id))]
     out["menu_entries"] = [{"menu": MENU_NAMES.get(r["menu"], r["menu"]), "label": r["label"]} for r in conn.execute(
         "SELECT menu, label FROM nav_items WHERE page_id = ? ORDER BY menu, id", (page_id,))]
+    out["rule_marks"] = {r["field"]: r["rule_name"] for r in conn.execute(
+        "SELECT field, rule_name FROM rule_marks WHERE page_id = ?", (page_id,))}
     out["old_redirects"] = [dict(r) for r in conn.execute(
         "SELECT source_url, status_code FROM existing_redirects WHERE target_url IN (SELECT value FROM json_each(?)) "
         "ORDER BY source_url LIMIT 50", (json.dumps(variants),))]

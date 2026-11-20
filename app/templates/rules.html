@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Rules · {{ project }}{% endblock %}
+{% block body_attrs %} data-slug="{{ slug }}" data-csrf="{{ csrf }}"{% endblock %}
+{% block main_class %}content full{% endblock %}
+{% block content %}
+<h1>Rules</h1>
+<p class="muted small">If-then rules for the Pages grid: <strong>include</strong> pages where conditions match, then
+  <strong>set</strong> fields. Conditions in a group must all match; a page matches when any group does. Rules are
+  saved to your account, so they can be used in every project. Tick the ones to run here, <strong>Preview</strong>
+  what they'd change, and <strong>Apply</strong>: one step you can undo. Rules run top to bottom, each seeing what the
+  ones above it changed.</p>
+
+<div class="rules-layout">
+  <aside class="rules-side">
+    <section class="card">
+      <div class="menu-head"><h2>Your rules</h2><button type="button" id="new-rule">+ New rule</button></div>
+      <ul id="rule-list" class="rule-list"></ul>
+      <p id="rule-list-empty" class="muted small" hidden>No rules yet. Make one with <strong>+ New rule</strong>.</p>
+      <div class="row">
+        <button type="button" id="preview-checked">Preview ticked rules</button>
+        <button type="button" class="primary" id="apply-checked">Apply ticked rules</button>
+      </div>
+      <p id="run-status" class="small" role="status" aria-live="polite"></p>
+    </section>
+    <section class="card">
+      <h2>Page dates</h2>
+      <p class="muted small">Where date conditions get each page's date, tried in order.</p>
+      <ol id="date-sources" class="date-sources"></ol>
+      <label class="small">Add a source <select id="date-add"></select></label>
+      <p id="date-coverage" class="small"></p>
+    </section>
+  </aside>
+
+  <section class="card rules-editor" id="editor" hidden>
+    <div class="row editor-head">
+      <label class="grow">Rule name <input id="rule-name" type="text" maxlength="100" placeholder="e.g. Old news"></label>
+      <span id="rule-dirty" class="muted small" hidden>Unsaved changes</span>
+    </div>
+    <div class="rule-sentence">
+      <select id="rule-mode" aria-label="Include or exclude">
+        <option value="include">Include</option>
+        <option value="exclude">Exclude</option>
+      </select>
+      <span>pages where</span>
+    </div>
+    <div id="groups"></div>
+    <button type="button" class="link" id="add-group">+ or…</button>
+    <h3>Then set</h3>
+    <div id="actions"></div>
+    <button type="button" class="link" id="add-action">+ set another field</button>
+    <p class="error" id="editor-error" role="alert"></p>
+    <div class="row">
+      <button type="button" class="primary" id="save-rule">Save rule</button>
+      <button type="button" id="preview-rule">Preview this rule</button>
+      <button type="button" id="delete-rule">Delete</button>
+    </div>
+  </section>
+  <section class="card rules-editor" id="editor-empty">
+    <p class="muted">Pick a rule to edit, or make a new one.</p>
+  </section>
+</div>
+
+<section id="results" class="rules-results" hidden></section>
+<script src="/static/vendor/Sortable.min.js"></script>
+<script src="/static/rules.js"></script>
+{% endblock %}

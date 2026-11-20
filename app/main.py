@@ -26,7 +26,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 import sitemap2proto as sp
-from app import auth, config, exports, grid, history, importer, nav, rules, tree, urls
+from app import auth, automation, config, dates, exports, grid, history, importer, nav, rules, tree, urls
 from app.db import DISPOSITIONS, SLUG_RE, Store, now_ms
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -103,6 +103,23 @@ class NavNewPage(BaseModel):
     menu: str
     parent_id: Optional[int] = None
     label: str
+
+
+class RuleIn(BaseModel):
+    name: str
+    definition: Dict[str, Any]
+
+
+class RulesRun(BaseModel):
+    rules: List[RuleIn]
+
+
+class RuleOrder(BaseModel):
+    ids: List[int]
+
+
+class DateSources(BaseModel):
+    sources: List[str]
 
 
 class NavMove(BaseModel):
@@ -708,6 +725,138 @@ def create_app(data_directory: Optional[str] = None, secure_cookies: Optional[bo
     @app.post("/api/p/{slug}/history/redo")
     def history_redo(request: Request, slug: str):
         return history_step(request, slug, history.redo)
+
+    # ---- rules (if-then bulk updates) ----------------------------------------
+    # The library belongs to the person (registry); running rules happens in a project.
+
+    def clean_rule(rule: RuleIn) -> tuple:
+        name = " ".join(rule.name.split())[:100]
+        if not name:
+            raise automation.RuleDefinitionError("Give the rule a name.")
+        return name, automation.clean_definition(rule.definition)
+
+    def rule_error(e: Exception) -> JSONResponse:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+
+    @app.get("/p/{slug}/rules", response_class=HTMLResponse)
+    def rules_view(request: Request, slug: str):
+        require_user(request)
+        open_project(slug).close()
+        return render(request, "rules.html", slug=slug, project=project_name(slug), tab="rules")
+
+    @app.get("/api/rules")
+    def rules_list(request: Request):
+        uid = require_user(request)
+        with closing(store.registry()) as reg:
+            rows = reg.execute("SELECT id, name, definition FROM rules WHERE user_id = ? ORDER BY sort_order, id",
+                               (uid,)).fetchall()
+        return {"rules": [{"id": r["id"], "name": r["name"], "definition": json.loads(r["definition"])} for r in rows],
+                "schema": automation.schema()}
+
+    @app.post("/api/rules")
+    def rules_create(request: Request, rule: RuleIn):
+        uid = require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        try:
+            name, definition = clean_rule(rule)
+        except automation.RuleDefinitionError as e:
+            return rule_error(e)
+        with closing(store.registry()) as reg:
+            if reg.execute("SELECT count(*) FROM rules WHERE user_id = ?", (uid,)).fetchone()[0] >= 200:
+                return rule_error(ValueError("That's 200 rules already. Delete some first."))
+            last = reg.execute("SELECT COALESCE(max(sort_order), 0) FROM rules WHERE user_id = ?", (uid,)).fetchone()[0]
+            rule_id = reg.execute(
+                "INSERT INTO rules(user_id, name, definition, sort_order, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                (uid, name, json.dumps(definition), last + 10, now_ms(), now_ms())).lastrowid
+        return {"id": rule_id, "name": name, "definition": definition}
+
+    @app.put("/api/rules/{rule_id}")
+    def rules_update(request: Request, rule_id: int, rule: RuleIn):
+        uid = require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        try:
+            name, definition = clean_rule(rule)
+        except automation.RuleDefinitionError as e:
+            return rule_error(e)
+        with closing(store.registry()) as reg:
+            cur = reg.execute("UPDATE rules SET name = ?, definition = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                              (name, json.dumps(definition), now_ms(), rule_id, uid))
+        if not cur.rowcount:
+            raise HTTPException(404, "No such rule.")
+        return {"id": rule_id, "name": name, "definition": definition}
+
+    @app.delete("/api/rules/{rule_id}")
+    def rules_delete(request: Request, rule_id: int):
+        uid = require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        with closing(store.registry()) as reg:
+            reg.execute("DELETE FROM rules WHERE id = ? AND user_id = ?", (rule_id, uid))
+        return {"ok": True}
+
+    @app.post("/api/rules/order")
+    def rules_order(request: Request, order: RuleOrder):
+        uid = require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        with closing(store.registry()) as reg:
+            reg.executemany("UPDATE rules SET sort_order = ? WHERE id = ? AND user_id = ?",
+                            [((i + 1) * 10, rule_id, uid) for i, rule_id in enumerate(order.ids[:500])])
+        return {"ok": True}
+
+    @app.get("/api/p/{slug}/rules/context")
+    def rules_context(request: Request, slug: str):
+        """What this project offers rules: its crawl columns and where page dates come from."""
+        require_user(request)
+        with closing(open_project(slug)) as conn:
+            return {"crawl_columns": dates.crawl_columns(conn), "date_sources": dates.sources(conn),
+                    "source_names": dates.SOURCES, "coverage": dates.coverage(conn)}
+
+    @app.post("/api/p/{slug}/dates")
+    def date_sources_save(request: Request, slug: str, body: DateSources):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        try:
+            chosen = dates.clean_sources(body.sources)
+        except ValueError as e:
+            return rule_error(e)
+        with closing(open_project(slug)) as conn, recorded(request, conn, "Changed where page dates come from"):
+            conn.execute("UPDATE settings SET date_sources = ?", (json.dumps(chosen),))
+        with closing(open_project(slug)) as conn:
+            return {"date_sources": chosen, "coverage": dates.coverage(conn)}
+
+    def named_rules(body: RulesRun) -> list:
+        if not body.rules:
+            raise automation.RuleDefinitionError("Choose at least one rule.")
+        if len(body.rules) > 50:
+            raise automation.RuleDefinitionError("Up to 50 rules at a time.")
+        return [clean_rule(r) for r in body.rules]
+
+    @app.post("/api/p/{slug}/rules/preview")
+    def rules_preview(request: Request, slug: str, body: RulesRun):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        try:
+            named = named_rules(body)
+        except automation.RuleDefinitionError as e:
+            return rule_error(e)
+        with closing(open_project(slug)) as conn:
+            return {"rules": automation.report(conn, automation.run(conn, named, write=False))}
+
+    @app.post("/api/p/{slug}/rules/apply")
+    def rules_apply(request: Request, slug: str, body: RulesRun):
+        require_user(request)
+        check_csrf(request, request.headers.get("X-CSRF-Token"))
+        try:
+            named = named_rules(body)
+        except automation.RuleDefinitionError as e:
+            return rule_error(e)
+        names = ", ".join(n for n, _ in named)
+        with closing(open_project(slug)) as conn:
+            with recorded(request, conn, f"Ran rules: {names}") as rec:
+                outcomes = automation.run(conn, named, write=True)
+                changed = len({p for o in outcomes for p in o.changed})
+                rec.label = (f"Ran {len(named)} rule{'s' if len(named) != 1 else ''} ({names}): "
+                             f"changed {changed} page{'s' if changed != 1 else ''}")
+            return {"changed": changed, "rules": automation.report(conn, outcomes)}
 
     # ---- prototype ---------------------------------------------------------
 

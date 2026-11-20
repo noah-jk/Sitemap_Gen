@@ -15,6 +15,7 @@
   <span class="project-name">{{ project }}</span>
   <nav class="tabs" aria-label="Project">
     <a href="/p/{{ slug }}/pages"{% if tab == "pages" %} aria-current="page"{% endif %}>Pages</a>
+    <a href="/p/{{ slug }}/rules"{% if tab == "rules" %} aria-current="page"{% endif %}>Rules</a>
     <a href="/p/{{ slug }}/tree"{% if tab == "tree" %} aria-current="page"{% endif %}>Sitemap</a>
     <a href="/p/{{ slug }}/nav"{% if tab == "nav" %} aria-current="page"{% endif %}>Navigation</a>
     <a href="/p/{{ slug }}/prototype"{% if tab == "prototype" %} aria-current="page"{% endif %}>Prototype</a>
