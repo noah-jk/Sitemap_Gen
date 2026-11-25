@@ -27,7 +27,11 @@
       return {ok: false, data: {detail: "Couldn't reach the server. Nothing was changed."}};
     }
     if (resp.status === 401) window.location.href = "/login";
-    return {ok: resp.ok, status: resp.status, data: await resp.json().catch(() => ({}))};
+    const data = await resp.json().catch(() => ({}));
+    if (resp.status >= 500 && !data.detail) {
+      data.detail = `Something went wrong on the server (error ${resp.status}), so nothing was changed.`;
+    }
+    return {ok: resp.ok, status: resp.status, data};
   }
 
   let schema = null;        // what conditions and actions are available

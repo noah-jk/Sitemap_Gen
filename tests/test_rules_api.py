@@ -73,3 +73,22 @@ def test_date_sources_and_coverage(imported):
     assert r.json()["date_sources"] == ["url_date"]
     assert imported.post("/api/p/example/dates", json={"sources": ["bogus"]}, headers=hdr).status_code == 400
     assert "rules" in imported.get("/p/example/rules").text.lower()
+
+
+def test_rules_changing_the_same_field_apply_together(imported):
+    """The second rule overwrites the first one's mark on the same page (an upsert), inside one
+    recorded action."""
+    hdr = {"X-CSRF-Token": grid_csrf(imported)}
+    review = {"groups": [[{"field": "path", "op": "matches", "value": "/admissions/**"}]],
+              "actions": [{"field": "recommendation", "kind": "value", "value": "review"}]}
+    combine = {"groups": [[{"field": "path", "op": "matches", "value": "/admissions/*"}]],
+               "actions": [{"field": "combine_into", "kind": "sitemap_parent", "value": "recommendation"}]}
+    body = {"rules": [{"name": "Review", "definition": review}, {"name": "Combine", "definition": combine}]}
+    r = imported.post("/api/p/example/rules/apply", json=body, headers=hdr)
+    assert r.status_code == 200 and r.json()["changed"] >= 2
+    apply = page_by_path(imported, "/admissions/apply")
+    assert apply["recommendation"] == "combine"
+    detail = imported.get(f"/api/p/example/pages/{apply['id']}/detail").json()
+    assert detail["rule_marks"]["recommendation"] == "Combine"
+    assert imported.post("/api/p/example/history/undo", headers=hdr).status_code == 200
+    assert page_by_path(imported, "/admissions/apply")["recommendation"] is None

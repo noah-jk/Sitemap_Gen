@@ -51,8 +51,12 @@ def _install(conn) -> None:
     if conn.execute("SELECT 1 FROM temp.sqlite_master WHERE name = 'history_cursor'").fetchone():
         return
     stmts = ["CREATE TEMP TABLE history_cursor(token TEXT NOT NULL, user TEXT NOT NULL, label TEXT NOT NULL, at INTEGER NOT NULL)"]
-    start = ("INSERT OR IGNORE INTO actions(token, user, label, created_at) "
-             "SELECT token, user, label, at FROM history_cursor;")
+    # The action row is created by the first change. Not with INSERT OR IGNORE: an upsert's
+    # ON CONFLICT replaces the conflict policy of statements its triggers run, so the second change
+    # recorded by an upsert would fail on the duplicate token.
+    start = ("INSERT INTO actions(token, user, label, created_at) "
+             "SELECT token, user, label, at FROM history_cursor c "
+             "WHERE NOT EXISTS (SELECT 1 FROM actions a WHERE a.token = c.token);")
     for table, (key, untracked) in TRACKED.items():
         cols = _columns(conn, table)
         tracked = [c for c in cols if c not in untracked]
