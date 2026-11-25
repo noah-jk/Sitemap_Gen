@@ -1,0 +1,29 @@
+# Dependabot keeps the pinned versions current. Security fixes come as soon as an advisory has a
+# fix (enable "Dependabot security updates" in the repository's security settings); everything
+# else comes once a month, grouped into one pull request per kind so it isn't a flood. Each pull
+# request runs the test suite and image build in CI, so a breaking update shows up before merging.
+version: 2
+updates:
+  # requirements.txt and requirements-dev.txt
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      python-packages:
+        patterns: ["*"]
+
+  # The actions in .github/workflows/image.yml
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # The python:3.13-slim base image in the Dockerfile
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
